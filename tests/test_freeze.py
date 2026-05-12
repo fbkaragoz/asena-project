@@ -43,3 +43,57 @@ def test_file_sha256_is_stable(tmp_path):
     h2 = file_sha256(p)
     assert h1 == h2
     assert len(h1) == 64
+
+
+from factory.guards import (
+    check_protected_paths, ProtectedPathViolation,
+    scan_forbidden_patterns, ForbiddenPatternViolation,
+    PROTECTED_PATHS, FORBIDDEN_IMPORTS,
+)
+
+
+def test_check_protected_paths_blocks_eval_edit():
+    diff_paths = ["eval/policy.py"]
+    import pytest
+    with pytest.raises(ProtectedPathViolation, match="eval/policy.py"):
+        check_protected_paths(diff_paths)
+
+
+def test_check_protected_paths_blocks_frozen_lock():
+    import pytest
+    with pytest.raises(ProtectedPathViolation):
+        check_protected_paths(["tokenizer/FROZEN.lock"])
+
+
+def test_check_protected_paths_blocks_safety_md():
+    import pytest
+    with pytest.raises(ProtectedPathViolation):
+        check_protected_paths(["SAFETY.md"])
+
+
+def test_check_protected_paths_allows_train_edit():
+    check_protected_paths(["train/train.py", "data/cleaning_rules.yaml"])  # no raise
+
+
+def test_scan_forbidden_patterns_blocks_distributed():
+    code = "import torch.distributed as dist\n"
+    import pytest
+    with pytest.raises(ForbiddenPatternViolation, match="torch.distributed"):
+        scan_forbidden_patterns(code)
+
+
+def test_scan_forbidden_patterns_blocks_moe():
+    code = "class MixtureOfExperts(nn.Module): pass"
+    import pytest
+    with pytest.raises(ForbiddenPatternViolation):
+        scan_forbidden_patterns(code)
+
+
+def test_scan_forbidden_patterns_allows_normal_torch():
+    code = "import torch\nimport torch.nn as nn\nclass Block(nn.Module): pass\n"
+    scan_forbidden_patterns(code)  # no raise
+
+
+def test_forbidden_imports_includes_expected():
+    assert "torch.distributed" in FORBIDDEN_IMPORTS
+    assert any("MoE" in p or "MixtureOfExperts" in p for p in FORBIDDEN_IMPORTS)

@@ -2,6 +2,8 @@
 from __future__ import annotations
 import hashlib
 import json
+import re
+import fnmatch
 import socket
 from datetime import datetime, timezone
 from pathlib import Path
@@ -53,3 +55,52 @@ def verify_freeze_invariants(lock_path: Path, files: dict[str, Path]) -> None:
                 f"hash mismatch for {label} ({path}): "
                 f"expected {expected[label][:12]}..., got {actual[:12]}..."
             )
+
+
+PROTECTED_PATHS: tuple[str, ...] = (
+    "eval/**",
+    "tokenizer/asena-bpe-24k.json",
+    "factory/**",
+    "cli.py",
+    "SAFETY.md",
+    "README.md",
+    "data/modern_loanwords.txt",
+    "agent/prompts/**",
+    "**/FROZEN.lock",
+)
+
+
+def check_protected_paths(diff_paths: list[str]) -> None:
+    """Raise ProtectedPathViolation if any path in diff_paths matches a protected glob."""
+    for path in diff_paths:
+        for pattern in PROTECTED_PATHS:
+            if fnmatch.fnmatchcase(path, pattern):
+                raise ProtectedPathViolation(
+                    f"diff modifies protected path: {path} (pattern: {pattern})"
+                )
+
+
+class ForbiddenPatternViolation(RuntimeError):
+    pass
+
+
+FORBIDDEN_IMPORTS: tuple[str, ...] = (
+    "torch.distributed",
+    "MixtureOfExperts",
+    "MoE",
+    "mamba",
+    "mamba_ssm",
+    "s4",
+    "hyena",
+)
+
+_FORBIDDEN_RE = re.compile(
+    r"\b(" + "|".join(re.escape(p) for p in FORBIDDEN_IMPORTS) + r")\b"
+)
+
+
+def scan_forbidden_patterns(code: str) -> None:
+    """Raise ForbiddenPatternViolation if `code` contains any forbidden pattern."""
+    m = _FORBIDDEN_RE.search(code)
+    if m:
+        raise ForbiddenPatternViolation(f"forbidden pattern: {m.group(1)}")

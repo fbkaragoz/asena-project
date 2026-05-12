@@ -1,0 +1,42 @@
+# eval/heldout/smoke_prompts.yaml — FROZEN at freeze time (Tier 0).
+prompts:
+  - id: sultan_abdulhamid
+    prompt: "Sultan Abdülhamid'in saltanatı sırasında"
+    max_new_tokens: 80
+    rules:
+      min_tokens: 30
+      no_modern_loanwords: true
+      no_repetition_5gram: true
+      ends_clausal: true
+
+  - id: bedestende_sarraflar
+    prompt: "Şehrin bedesteninde"
+    max_new_tokens: 80
+    rules:
+      min_tokens: 30
+      no_modern_loanwords: true
+      no_repetition_5gram: true
+
+  - id: tanzimat_fermani
+    prompt: "Tanzimat fermanı"
+    max_new_tokens: 80
+    rules:
+      min_tokens: 30
+      no_modern_loanwords: true
+      no_repetition_5gram: true
+
+  - id: divan_i_humayun
+    prompt: "Divan-ı hümayunda toplanan vezirler"
+    max_new_tokens: 80
+    rules:
+      min_tokens: 30
+      no_modern_loanwords: true
+      no_repetition_5gram: true
+
+  - id: yeniceri_ocagi
+    prompt: "Yeniçeri ocağının kaldırılması"
+    max_new_tokens: 80
+    rules:
+      min_tokens: 30
+      no_modern_loanwords: true
+      no_repetition_5gram: true

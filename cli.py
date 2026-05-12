@@ -21,5 +21,16 @@ def prepare_data(raw_dir, out_dir, rules, heldout_pct):
     click.echo(f"prepare-data: {summary}")
 
 
+@cli.command("train-tokenizer")
+@click.option("--train-glob", type=str, default="data/clean/train/*.parquet")
+@click.option("--out", type=click.Path(path_type=Path), default=Path("tokenizer/asena-bpe-24k.json"))
+@click.option("--vocab-size", type=int, default=24000)
+def train_tokenizer_cmd(train_glob, out, vocab_size):
+    """Train the asena BPE tokenizer on the cleaned train split."""
+    from tokenizer.train_bpe import train_bpe
+    train_bpe(train_glob=train_glob, out_path=out, vocab_size=vocab_size)
+    click.echo(f"train-tokenizer: wrote {out}")
+
+
 if __name__ == "__main__":
     cli()

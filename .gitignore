@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Project-specific (per design §2)
+checkpoints/
+experiments.sqlite
+experiments.sqlite-journal
+data/raw/
+data/clean/
+logs/
+
+# Tokenizer training intermediates (the final asena-bpe-24k.json IS committed)
+tokenizer/intermediate/
+
+# Editor / OS
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db

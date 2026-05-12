@@ -1,0 +1,33 @@
+[project]
+name = "asena-project"
+version = "0.1.0"
+description = "Autoresearch pipeline for the cdli/asena Ottoman Turkish base model"
+requires-python = ">=3.11"
+dependencies = [
+  "torch>=2.3",
+  "tokenizers>=0.20",
+  "pyarrow>=15",
+  "pandas>=2.2",
+  "click>=8.1",
+  "pyyaml>=6.0",
+  "datasketch>=1.6",
+  "tqdm>=4.66",
+  "GitPython>=3.1",
+  "pydantic>=2.7",
+  "numpy>=1.26",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "pytest-xdist>=3", "ruff>=0.5"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["data*", "eval*", "factory*", "tokenizer*", "train*", "agent*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q --strict-markers"
+markers = ["slow: marks tests requiring GPU or > 10s wall clock"]

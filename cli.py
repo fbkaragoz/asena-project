@@ -138,5 +138,24 @@ def baseline_show():
     click.echo(json.dumps(b, indent=2, default=str) if b else "(no baseline yet)")
 
 
+@cli.command("autoresearch-run")
+@click.option("--duration", type=str, default="8h", help="Session duration (informational only — kimi loops until killed).")
+def autoresearch_run_cmd(duration):
+    """Launch a kimi session pointed at agent/prompts/run-autoresearch.md.
+
+    Requires `kimi` CLI installed (https://github.com/MoonshotAI/kimi-cli).
+    """
+    import subprocess
+    prompt_path = Path("agent/prompts/run-autoresearch.md")
+    if not prompt_path.exists():
+        raise click.ClickException(f"missing {prompt_path}")
+    prompt = prompt_path.read_text()
+    click.echo(f"autoresearch-run: starting kimi session (intended duration: {duration})")
+    try:
+        subprocess.run(["kimi", "--yolo", "-p", prompt], check=False)
+    except FileNotFoundError:
+        raise click.ClickException("kimi CLI not found in PATH; install: curl -L code.kimi.com/install.sh | bash")
+
+
 if __name__ == "__main__":
     cli()

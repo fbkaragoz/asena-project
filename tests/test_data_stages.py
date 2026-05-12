@@ -56,3 +56,26 @@ def test_modern_loanword_filter_allows_low_ratio():
 def test_length_filter_rejects_too_short():
     rules = load_cleaning_rules(Path("data/cleaning_rules.yaml"))
     assert apply_cleaning_rules("kısa metin", rules) is None
+
+
+from data.stages import dedup_minhash
+
+
+def test_dedup_removes_near_duplicates():
+    texts = [
+        "şehrin bedesteninde âlim ve sarraflar mevcut idi ve müşterilere mal arz ederlerdi",
+        "şehrin bedesteninde âlim ve sarraflar mevcut idi ve müşterilere mal arz ederler",  # near-dup
+        "Sultan Abdülhamid'in saltanatı sırasında devlet-i aliyye büyük tahavvüllere uğradı",
+    ]
+    kept = dedup_minhash(texts, threshold=0.85)
+    # The first two are near-dups; only one should remain.
+    assert len(kept) == 2
+
+
+def test_dedup_keeps_distinct_texts():
+    texts = [
+        "Sultan Abdülhamid'in saltanatı sırasında devlet-i aliyye büyük tahavvüllere uğradı",
+        "Tanzimat fermanı ile birlikte memalik-i osmaniyede yeni bir devre başlamıştır",
+    ]
+    kept = dedup_minhash(texts, threshold=0.85)
+    assert len(kept) == 2

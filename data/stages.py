@@ -9,6 +9,7 @@ import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
 import yaml
+from datasketch import MinHash, MinHashLSH
 
 _CONTROL_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
 _WHITESPACE_RE = re.compile(r"\s+")
@@ -85,3 +86,33 @@ def apply_cleaning_rules(text: str, rules: CleaningRules) -> str | None:
     if modern_count / len(tokens) > rules.max_modern_ratio:
         return None
     return text
+
+
+# ---------------------------------------------------------------------------
+# Stage 3: locked MinHash near-duplicate removal (Tier 1)
+# ---------------------------------------------------------------------------
+
+
+def _shingles(text: str, k: int = 5) -> set[str]:
+    """Character k-shingles for MinHash."""
+    text = text.lower()
+    return {text[i:i+k] for i in range(max(0, len(text) - k + 1))}
+
+
+def dedup_minhash(texts: list[str], threshold: float = 0.85, num_perm: int = 128) -> list[int]:
+    """Stage 3: locked MinHash near-duplicate removal.
+
+    Returns the list of INDICES into `texts` that should be kept. Greedy: first
+    occurrence wins. Deterministic given input order.
+    """
+    lsh = MinHashLSH(threshold=threshold, num_perm=num_perm)
+    keep: list[int] = []
+    for i, t in enumerate(texts):
+        m = MinHash(num_perm=num_perm)
+        for sh in _shingles(t):
+            m.update(sh.encode("utf-8"))
+        if lsh.query(m):
+            continue
+        lsh.insert(str(i), m)
+        keep.append(i)
+    return keep

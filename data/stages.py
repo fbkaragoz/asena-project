@@ -6,6 +6,9 @@ Stage 2 (apply_cleaning_rules) is agent-editable via data/cleaning_rules.yaml.
 from __future__ import annotations
 import re
 import unicodedata
+from dataclasses import dataclass
+from pathlib import Path
+import yaml
 
 _CONTROL_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
 _WHITESPACE_RE = re.compile(r"\s+")
@@ -24,3 +27,61 @@ def normalize(text: str) -> str:
     text = text.replace("\r\n", " ").replace("\r", " ").replace("\n", " ").replace("\t", " ")
     text = _WHITESPACE_RE.sub(" ", text)
     return text.strip()
+
+
+# ---------------------------------------------------------------------------
+# Stage 2: agent-editable cleaning (Tier 2)
+# ---------------------------------------------------------------------------
+
+@dataclass
+class CleaningRules:
+    version: int
+    substitutions: list[tuple[re.Pattern, str]]
+    min_chars: int
+    max_chars: int
+    modern_loanwords: frozenset[str]
+    max_modern_ratio: float
+    era_weights: dict[str, float]
+
+
+def load_cleaning_rules(path: Path) -> CleaningRules:
+    """Load Stage 2 cleaning rules from YAML; load modern loanwords from blacklist file."""
+    with open(path) as f:
+        cfg = yaml.safe_load(f)
+    subs = [(re.compile(s["pattern"]), s["replace"]) for s in cfg.get("substitutions", [])]
+    lf = cfg["length_filters"]
+    mt = cfg["modern_turkish_filter"]
+    er = cfg["era_routing"]
+    blacklist_path = Path(mt["blacklist_file"])
+    if not blacklist_path.is_absolute():
+        blacklist_path = path.parent.parent / blacklist_path
+    with open(blacklist_path) as f:
+        loanwords = frozenset(w.strip().lower() for w in f if w.strip() and not w.startswith("#"))
+    return CleaningRules(
+        version=cfg["version"], substitutions=subs,
+        min_chars=lf["min_chars"], max_chars=lf["max_chars"],
+        modern_loanwords=loanwords, max_modern_ratio=mt["max_ratio"],
+        era_weights={k: v["weight"] for k, v in er.items()},
+    )
+
+
+_TOKEN_RE = re.compile(r"\b\w+\b", re.UNICODE)
+
+
+def apply_cleaning_rules(text: str, rules: CleaningRules) -> str | None:
+    """Stage 2: agent-editable cleaning.
+
+    Returns the cleaned string, or None if the line should be dropped (filtered).
+    """
+    for pat, repl in rules.substitutions:
+        text = pat.sub(repl, text)
+    text = text.strip()
+    if not (rules.min_chars <= len(text) <= rules.max_chars):
+        return None
+    tokens = [t.lower() for t in _TOKEN_RE.findall(text)]
+    if not tokens:
+        return None
+    modern_count = sum(1 for t in tokens if t in rules.modern_loanwords)
+    if modern_count / len(tokens) > rules.max_modern_ratio:
+        return None
+    return text

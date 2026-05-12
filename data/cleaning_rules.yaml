@@ -1,0 +1,23 @@
+# data/cleaning_rules.yaml — AGENT-EDITABLE (Tier 2)
+# Bumped on every agent edit.
+version: 1
+
+# Ordered regex passes. Applied left-to-right.
+substitutions:
+  - {pattern: '^\s*\d+\s*$', replace: ''}              # bare page numbers (whole string)
+  - {pattern: '^\s*\d+\s+', replace: ''}               # leading page number at start of text
+  - {pattern: '-\n', replace: ''}                      # de-hyphenate broken lines
+  - {pattern: '\s+', replace: ' '}                     # final whitespace squash
+
+length_filters:
+  min_chars: 40
+  max_chars: 4000
+
+modern_turkish_filter:
+  blacklist_file: data/modern_loanwords.txt
+  max_ratio: 0.05                                       # reject if > 5% modern tokens
+
+era_routing:
+  classical:    {weight: 0.20}
+  late_ottoman: {weight: 0.55}
+  tanzimat:     {weight: 0.25}

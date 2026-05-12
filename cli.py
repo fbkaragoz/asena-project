@@ -84,5 +84,59 @@ def unfreeze_cmd(i_know_what_im_doing, clear_ledger):
         click.echo("unfreeze: removed experiments.sqlite")
 
 
+@cli.command("train-sprint")
+def train_sprint_cmd():
+    """Run one autoresearch sprint cycle end-to-end.
+
+    Pre-flight → smoke (30s) → sprint (~5min) → eval → accept/reject.
+    Prints outcome JSON to stdout for kimi to parse.
+    """
+    from factory.orchestrator import run_train_sprint
+    import json
+    result = run_train_sprint()
+    click.echo(json.dumps(result, indent=2, default=str))
+
+
+@cli.group("ledger")
+def ledger_cmd():
+    """Query the experiment ledger."""
+
+
+@ledger_cmd.command("tail")
+@click.argument("n", type=int, default=20)
+def ledger_tail(n):
+    """Show last N experiments."""
+    import json
+    from factory.db import Ledger
+    rows = Ledger(Path("experiments.sqlite")).list_experiments(limit=n)
+    click.echo(json.dumps(rows, indent=2, default=str))
+
+
+@ledger_cmd.command("query")
+@click.option("--scope", type=str, default=None)
+@click.option("--outcome", type=str, default=None)
+@click.option("--limit", type=int, default=50)
+def ledger_query(scope, outcome, limit):
+    """Filtered ledger query."""
+    import json
+    from factory.db import Ledger
+    rows = Ledger(Path("experiments.sqlite")).query(scope=scope, outcome=outcome, limit=limit)
+    click.echo(json.dumps(rows, indent=2, default=str))
+
+
+@cli.group("baseline")
+def baseline_cmd():
+    """Current baseline."""
+
+
+@baseline_cmd.command("show")
+def baseline_show():
+    """Print current baseline JSON."""
+    import json
+    from factory.db import Ledger
+    b = Ledger(Path("experiments.sqlite")).get_baseline()
+    click.echo(json.dumps(b, indent=2, default=str) if b else "(no baseline yet)")
+
+
 if __name__ == "__main__":
     cli()

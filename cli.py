@@ -157,5 +157,76 @@ def autoresearch_run_cmd(duration):
         raise click.ClickException("kimi CLI not found in PATH; install: curl -L code.kimi.com/install.sh | bash")
 
 
+@cli.command("train-promotion")
+@click.option("--config", type=click.Path(path_type=Path, exists=True),
+              default=Path("train/configs/promotion.yaml"))
+@click.option("--out", type=click.Path(path_type=Path),
+              default=Path("checkpoints/asena-base-v0.1"))
+def train_promotion_cmd(config, out):
+    """Long-running promotion training run (~24-36h on RTX 4090).
+
+    Uses the current ACCEPTED baseline architecture/recipe, scaled to promotion size.
+    Saves model + tokenizer + config + sample generations to `out`.
+    """
+    from train.train import run_training
+    out.mkdir(parents=True, exist_ok=True)
+    result = run_training(
+        config_path=config,
+        tokenizer_path=Path("tokenizer/asena-bpe-24k.json"),
+        train_glob="data/clean/train/*.parquet",
+        checkpoint_out=out / "model.pt",
+        device="cuda",
+    )
+    import shutil
+    shutil.copy("tokenizer/asena-bpe-24k.json", out / "tokenizer.json")
+    (out / "eval_report.md").write_text(
+        f"# Promotion result\n\nFinal loss: {result['final_loss']:.4f}\n"
+        f"Wall time: {result['wall_seconds']:.1f}s\n"
+        f"Tokens seen: {result['tokens_seen']}\n"
+    )
+    click.echo(f"train-promotion: wrote {out}/")
+
+
+@cli.command("eval")
+@click.option("--checkpoint", type=click.Path(exists=True, path_type=Path), required=True)
+@click.option("--tokenizer", type=click.Path(exists=True, path_type=Path),
+              default=Path("tokenizer/asena-bpe-24k.json"))
+def eval_cmd(checkpoint, tokenizer):
+    """Run all four evaluators against an arbitrary checkpoint; print Scores."""
+    import json
+    from eval.heldout_ppl import compute_heldout_bpb
+    from eval.lexicon_score import compute_lexicon_score
+    from eval.flatness import compute_flatness
+    from eval.smoke import evaluate_smoke_prompts
+
+    bpb = compute_heldout_bpb(
+        checkpoint_path=checkpoint, tokenizer_path=tokenizer,
+        heldout_glob="eval/heldout/text/*.parquet",
+    )
+    fail_rate, results = evaluate_smoke_prompts(
+        checkpoint_path=checkpoint, tokenizer_path=tokenizer,
+        prompts_path=Path("eval/heldout/smoke_prompts.yaml"),
+        blacklist_path=Path("data/modern_loanwords.txt"),
+    )
+    gens = [r.generation for r in results]
+    lex = compute_lexicon_score(gens, lexicon_path=Path("eval/heldout/ottoman_lexicon.txt"))
+    flat = compute_flatness(gens, blacklist_path=Path("data/modern_loanwords.txt"))
+    click.echo(json.dumps({
+        "ppl_bpb": bpb, "lexicon": lex, "flatness": flat, "smoke": fail_rate,
+        "smoke_results": [r.__dict__ for r in results],
+    }, indent=2))
+
+
+@cli.command("export-gguf")
+@click.option("--checkpoint", type=click.Path(exists=True, path_type=Path), required=True)
+@click.option("--out", type=click.Path(path_type=Path), required=True)
+@click.option("--quant", type=str, default="q8_0")
+def export_gguf_cmd(checkpoint, out, quant):
+    """Convert a saved checkpoint dir -> GGUF for ollama/llama.cpp."""
+    from tools.convert_to_gguf import export_to_gguf
+    export_to_gguf(checkpoint_dir=checkpoint, out_path=out, quant=quant)
+    click.echo(f"export-gguf: wrote {out}")
+
+
 if __name__ == "__main__":
     cli()

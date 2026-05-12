@@ -79,3 +79,32 @@ def test_dedup_keeps_distinct_texts():
     ]
     kept = dedup_minhash(texts, threshold=0.85)
     assert len(kept) == 2
+
+
+from data.stages import split_train_heldout
+
+
+def test_split_is_deterministic_by_source_pdf():
+    rows = [{"source_pdf": f"doc_{i}.pdf", "text": f"text {i}"} for i in range(200)]
+    a = split_train_heldout(rows, heldout_pct=2)
+    b = split_train_heldout(rows, heldout_pct=2)
+    assert a == b  # deterministic
+
+
+def test_split_groups_by_source_pdf():
+    # Two rows from the same PDF must end up in the same split.
+    rows = [
+        {"source_pdf": "doc_1.pdf", "text": "a"},
+        {"source_pdf": "doc_1.pdf", "text": "b"},
+        {"source_pdf": "doc_2.pdf", "text": "c"},
+    ]
+    train, heldout = split_train_heldout(rows, heldout_pct=50)
+    pdfs_train = {r["source_pdf"] for r in train}
+    pdfs_heldout = {r["source_pdf"] for r in heldout}
+    assert pdfs_train.isdisjoint(pdfs_heldout)
+
+
+def test_split_approximate_heldout_fraction():
+    rows = [{"source_pdf": f"doc_{i}.pdf", "text": "x"} for i in range(1000)]
+    train, heldout = split_train_heldout(rows, heldout_pct=2)
+    assert 10 <= len(heldout) <= 40   # ~2% with some variance

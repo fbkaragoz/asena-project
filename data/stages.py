@@ -4,6 +4,7 @@ Stages 1, 3, 4 are LOCKED — must never be edited by the agent (Tier 1).
 Stage 2 (apply_cleaning_rules) is agent-editable via data/cleaning_rules.yaml.
 """
 from __future__ import annotations
+import hashlib
 import re
 import unicodedata
 from dataclasses import dataclass
@@ -116,3 +117,24 @@ def dedup_minhash(texts: list[str], threshold: float = 0.85, num_perm: int = 128
         lsh.insert(str(i), m)
         keep.append(i)
     return keep
+
+
+# ---------------------------------------------------------------------------
+# Stage 4: locked deterministic train/heldout split (Tier 1)
+# ---------------------------------------------------------------------------
+
+
+def split_train_heldout(
+    rows: list[dict], heldout_pct: int = 2
+) -> tuple[list[dict], list[dict]]:
+    """Stage 4: deterministic per-document train/heldout split.
+
+    Hashes source_pdf; rows where hash(source_pdf) % 100 < heldout_pct → heldout.
+    All rows from one source_pdf land in the same split.
+    """
+    train, heldout = [], []
+    for row in rows:
+        key = row["source_pdf"].encode("utf-8")
+        bucket = int(hashlib.sha256(key).hexdigest(), 16) % 100
+        (heldout if bucket < heldout_pct else train).append(row)
+    return train, heldout

@@ -139,22 +139,60 @@ def baseline_show():
 
 
 @cli.command("autoresearch-run")
-@click.option("--duration", type=str, default="8h", help="Session duration (informational only — kimi loops until killed).")
-def autoresearch_run_cmd(duration):
-    """Launch a kimi session pointed at agent/prompts/run-autoresearch.md.
+@click.option("--duration", type=str, default="8h", help="Session duration (informational only — the loop restarts kimi until killed).")
+@click.option("--restart-cooldown", type=int, default=30, help="Seconds to wait between kimi respawns.")
+def autoresearch_run_cmd(duration, restart_cooldown):
+    """Launch a long-running kimi loop pointed at agent/prompts/run-autoresearch.md.
+
+    Kimi has an internal `max_steps_per_turn` cap (default 100); even with
+    `--max-ralph-iterations -1` it can exit on context, errors, or quota. This
+    command wraps kimi in a Python restart loop: when kimi exits, it sleeps
+    `restart-cooldown` seconds and relaunches. Kimi reads `cli.py ledger tail
+    20` and `baseline show` at the start of every cycle, so a fresh session
+    has full memory of what was already tried.
+
+    Stop with Ctrl-C (or kill the tmux window).
 
     Requires `kimi` CLI installed (https://github.com/MoonshotAI/kimi-cli).
     """
     import subprocess
+    import time
+
     prompt_path = Path("agent/prompts/run-autoresearch.md")
     if not prompt_path.exists():
         raise click.ClickException(f"missing {prompt_path}")
     prompt = prompt_path.read_text()
-    click.echo(f"autoresearch-run: starting kimi session (intended duration: {duration})")
-    try:
-        subprocess.run(["kimi", "--yolo", "-p", prompt], check=False)
-    except FileNotFoundError:
-        raise click.ClickException("kimi CLI not found in PATH; install: curl -L code.kimi.com/install.sh | bash")
+    click.echo(f"autoresearch-run: starting kimi loop (intended duration: {duration})")
+    click.echo("press Ctrl-C to stop. Kimi auto-restarts after exit with a "
+               f"{restart_cooldown}s cooldown.")
+
+    kimi_argv = [
+        "kimi", "--yolo",
+        "--max-ralph-iterations", "-1",
+        "--max-steps-per-turn", "10000",
+        "-p", prompt,
+    ]
+    iteration = 0
+    while True:
+        iteration += 1
+        click.echo(f"\n[autoresearch-run] kimi iteration #{iteration} starting at "
+                   f"{time.strftime('%Y-%m-%d %H:%M:%S %Z')}")
+        try:
+            subprocess.run(kimi_argv, check=False)
+        except FileNotFoundError:
+            raise click.ClickException(
+                "kimi CLI not found in PATH; install: curl -L code.kimi.com/install.sh | bash"
+            )
+        except KeyboardInterrupt:
+            click.echo("\n[autoresearch-run] interrupted by user; exiting cleanly.")
+            return
+        click.echo(f"[autoresearch-run] kimi exited; sleeping {restart_cooldown}s before "
+                   "restart (Ctrl-C to stop)…")
+        try:
+            time.sleep(restart_cooldown)
+        except KeyboardInterrupt:
+            click.echo("\n[autoresearch-run] interrupted by user; exiting cleanly.")
+            return
 
 
 @cli.command("train-promotion")

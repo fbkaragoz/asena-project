@@ -1,7 +1,7 @@
 """asena base model architecture — decoder-only with RoPE/RMSNorm/SwiGLU/GQA (spec §4.3).
 
-AGENT-EDITABLE (Tier 2). Forbidden patterns (MoE, mamba, encoder, torch.distributed)
-are enforced pre-GPU by factory/guards.py — do not introduce them here.
+AGENT-EDITABLE (Tier 2). See factory/guards.py:FORBIDDEN_IMPORTS for the
+patterns enforced pre-GPU. Do not introduce any of them here.
 """
 from __future__ import annotations
 from dataclasses import dataclass

@@ -11,7 +11,7 @@ model:
   init_std: 0.02
   max_seq_len: 1024
 training:
-  seq_len: 1024
+  seq_len: 512
   batch_size: 32
   grad_accum: 1
   total_tokens: 25_000_000

@@ -14,9 +14,10 @@ def test_estimate_param_count_sprint():
 
 
 def test_estimate_param_count_promotion():
-    n = estimate_param_count(n_layers=18, n_embd=768, n_kv_heads=4, n_head=12,
+    # Post-second-amendment promotion config: n_layers=12, n_embd=640 → ~84M params.
+    n = estimate_param_count(n_layers=12, n_embd=640, n_kv_heads=4, n_head=10,
                              mlp_ratio=2.67, vocab_size=24000, tied=False)
-    assert 150_000_000 < n < 280_000_000
+    assert 70_000_000 < n < 100_000_000
 
 
 def test_check_sprint_bounds_rejects_too_big():
@@ -34,7 +35,31 @@ def test_check_sprint_bounds_passes_normal():
 
 
 def test_check_promotion_bounds_passes():
-    check_promotion_bounds(params=200_000_000, estimated_seconds=86400, estimated_vram_mb=20000)
+    # Sized for the actual 7.97M-token budget: ~84M params, ~1-2h wall clock.
+    check_promotion_bounds(params=84_000_000, estimated_seconds=7200, estimated_vram_mb=20000)
+
+
+def test_check_promotion_bounds_rejects_old_200m():
+    with pytest.raises(BoundsViolation, match="param count"):
+        check_promotion_bounds(params=200_000_000, estimated_seconds=7200, estimated_vram_mb=20000)
+
+
+def test_check_promotion_bounds_rejects_above_new_ceiling():
+    # After the second amendment, promotion is capped at 130M (was 180M).
+    with pytest.raises(BoundsViolation, match="param count"):
+        check_promotion_bounds(params=150_000_000, estimated_seconds=7200, estimated_vram_mb=20000)
+
+
+def test_check_promotion_bounds_rejects_too_small():
+    with pytest.raises(BoundsViolation, match="param count"):
+        check_promotion_bounds(params=50_000_000, estimated_seconds=7200, estimated_vram_mb=20000)
+
+
+def test_check_promotion_bounds_rejects_too_slow():
+    # Promotion wall-clock cap tightened to 4h after the second amendment
+    # (60M tokens, ~1-2h expected; >4h is a red flag for misconfiguration).
+    with pytest.raises(BoundsViolation, match="wall clock"):
+        check_promotion_bounds(params=84_000_000, estimated_seconds=5 * 3600, estimated_vram_mb=20000)
 
 
 def test_free_vram_mb_returns_int():

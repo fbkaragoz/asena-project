@@ -18,6 +18,11 @@ modern_turkish_filter:
   max_ratio: 0.05                                       # reject if > 5% modern tokens
 
 era_routing:
-  classical:    {weight: 0.20}
-  late_ottoman: {weight: 0.55}
-  tanzimat:     {weight: 0.25}
+  # Recalibrated 2026-05-12 against observed corpus mass after the Anadolu +
+  # Evliya import: 14,426 classical / 9,636 late_ottoman / 191 tanzimat.
+  # Tanzimat is intentionally floored at 0.01 to keep the routing well-defined;
+  # at <1% raw share, oversampling it harder would memorize those 191 pages.
+  # The agent is free to retune these (Tier-2) once a baseline exists.
+  classical:    {weight: 0.59}
+  late_ottoman: {weight: 0.40}
+  tanzimat:     {weight: 0.01}

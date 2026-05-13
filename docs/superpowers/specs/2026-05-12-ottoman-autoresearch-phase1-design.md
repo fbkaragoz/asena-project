@@ -12,7 +12,9 @@ phase: 1 of N (Phase 2+ deferrals documented below)
 
 ### 1.1 Goal
 
-Produce **`cdli/asena-base`**: a 150-300M-parameter decoder-only language model trained **from scratch** on cleaned, Latinized post-1500 Ottoman Turkish, with a custom 24k BPE tokenizer, via an evaluator-driven autoresearch loop where **kimi** acts as the researcher and a deterministic factory holds final authority over accept/reject decisions.
+Produce **`cdli/asena-base`**: a ~80M-parameter decoder-only language model trained **from scratch** on cleaned, Latinized post-1500 Ottoman Turkish, with a custom 24k BPE tokenizer, via an evaluator-driven autoresearch loop where **kimi** acts as the researcher and a deterministic factory holds final authority over accept/reject decisions.
+
+> **Sizing note (2026-05-12 amendments):** The initial draft targeted 150–300M params on 1.5B tokens. After the actual corpus was imported and the BPE was trained, the real budget is **7.97M unique training tokens** (`anadolu-ocr-corpus` + `evliya-celebi-seyahatname-ocr` after Stages 1–4) — the custom 24k BPE compresses Ottoman much harder than cl100k (3.6 chars/tok), so the on-disk char count translated to a far smaller token budget than the dataset cards' cl100k counts suggested. The promotion target was therefore amended twice in one session: first to ~125M params / 300M tokens, then to **~80M params / ~60M tokens (~7 epochs)** once the actual BPE-token budget was known. Larger sizes are deferred to a Phase-1.5 amendment after the corpus grows past ~30M unique BPE tokens.
 
 The published artifact is the model + tokenizer + training code + dataset, all under Apache-2.0 (code, weights) and CC-BY-4.0 (dataset). No fine-tune lineage. No foreign weights. The tokenizer, weights, and code are entirely owned by the project.
 
@@ -20,7 +22,7 @@ The published artifact is the model + tokenizer + training code + dataset, all u
 
 - Not a chatbot. `asena-base` is a next-token predictor in the GPT-2 sense.
 - Not instruction-following. SFT laps are deferred to Phase 2 specialist heads.
-- Not multi-variety. Crimean Tatar, Nogay, and Chagatai are explicitly out of scope for v1 (different languages, not just dialects — would produce interlingua slop at 200M).
+- Not multi-variety. Crimean Tatar, Nogay, and Chagatai are explicitly out of scope for v1 (different languages, not just dialects — would produce interlingua slop at this scale).
 - Not a fine-tune of any pretrained model.
 - No MoE, no Mamba, no encoder-decoder. Decoder-only dense transformer only.
 
@@ -31,7 +33,7 @@ The published artifact is the model + tokenizer + training code + dataset, all u
 | **Factory** | The deterministic pipeline that turns *(proposal, base config, base data)* into *(checkpoint, eval scores, accept/reject, git commit/revert)*. Tier-1 locked. |
 | **Researcher** | The kimi CLI subprocess that generates patches. Tier-2 surface only. |
 | **Sprint** | A 5-minute training run on a small (30-60M) model used for autoresearch iteration. Discovers recipes. |
-| **Promotion** | A 24-36-hour training run on the publishable (200-300M) model using the current accepted-baseline recipe. Produces shippable checkpoints. |
+| **Promotion** | A ~1-2-hour training run on the publishable (~80M) model using the current accepted-baseline recipe. Produces shippable checkpoints. |
 | **Freeze** | The one-time event locking the tokenizer + held-out eval set with SHA-256 hashes. Unfreeze is destructive on purpose. |
 | **Eval** | The four-evaluator harness + strict-no-trades policy combiner that decides accept/reject. The authority. |
 | **Baseline** | The current-best accepted model + scores + git SHA. Every new experiment compares against this, not against the previous experiment. |
@@ -214,9 +216,9 @@ eval:
 ```yaml
 profile: promotion
 model:
-  n_layers: 18
-  n_embd: 768
-  n_head: 12
+  n_layers: 12
+  n_embd: 640
+  n_head: 10
   n_kv_heads: 4
   mlp_ratio: 2.67
   rope_theta: 10000
@@ -226,26 +228,26 @@ training:
   seq_len: 2048
   batch_size: 16
   grad_accum: 4              # effective 64
-  total_tokens: 1_500_000_000  # ~24-30h on 4090
+  total_tokens: 60_000_000   # ~7 epochs over 7.97M unique tokens; ~1-2h on 4090
   lr_peak: 6e-4
   lr_schedule: cosine
-  warmup_steps: 2000
+  warmup_steps: 500
   weight_decay: 0.1
   betas: [0.9, 0.95]
   grad_clip: 1.0
   precision: bf16
   optimizer: adamw
 data:
-  mix: {classical: 0.20, late_ottoman: 0.55, tanzimat: 0.25}
+  mix: {classical: 0.59, late_ottoman: 0.40, tanzimat: 0.01}  # observed corpus mass after import
 eval:
-  every_steps: 1000
-  smoke_every_steps: 5000
-  checkpoint_every_steps: 2000
+  every_steps: 200
+  smoke_every_steps: 1000
+  checkpoint_every_steps: 500
   keep_last_n_checkpoints: 5
   keep_best_n_checkpoints: 3
 ```
 
-≈ 200M params. Trained ~1.5B tokens. Below Chinchilla-optimal — model card will be transparent about this.
+≈ 84M params. Trained ~60M tokens (~7 epochs). Severely data-constrained — the model card will be transparent about this. Heavy regularization (dropout, weight decay) and early stopping on heldout PPL are expected to dominate the recipe space the agent explores; bigger models are rejected by `factory/bounds.py` until the corpus grows past ~30M unique BPE tokens.
 
 ### 4.3 Architecture
 
@@ -261,10 +263,10 @@ eval:
 Sprint accepts don't auto-promote. Before `cli.py train-promotion`:
 
 1. Top-K (default 5) accepted recipes from sprint ledger.
-2. Each runs as **mini-promotion** (~6h, depth-12, 200M tokens) for verification.
+2. Each runs as **mini-promotion** (~2h, depth-10, 100M tokens) for verification.
 3. Lowest combined eval at mini-promotion → graduates to full 24-36h promotion.
 
-Catches sprint-to-promotion transfer failures (recipes that win at 30M/25Mt but lose at 200M/1.5Bt).
+Catches sprint-to-promotion transfer failures (recipes that win at 30M/25Mt but lose at 80M/60Mt).
 
 ## 5. Evaluation harness — the immutable contract
 
@@ -456,7 +458,7 @@ Kimi-CLI ships with: file r/w/edit, shell execution, web search/fetch, MCP. We p
 1. **Protected-paths guard.** Pre-run scan: refuse if diff touches `eval/`, `tokenizer/`, `factory/`, `cli.py`, `SAFETY.md`, `README.md`, `data/modern_loanwords.txt`, `agent/prompts/`, or any `*FROZEN.lock`. ~5 lines of code.
 2. **Smoke test.** 30-second pre-sprint check; rejects NaN/Inf/import-error patches before burning 5 minutes.
 3. **Forbidden imports/patterns.** Refuse patches that import or define: `torch.distributed`, `MoE`/`MixtureOfExperts`, `mamba`, `s4`, `hyena`, encoder modules.
-4. **Bounds.** Param count: sprint 20-80M, promotion 100-350M. Wall clock: sprint ≤ 6 min, promotion ≤ 48h. Peak VRAM: ≤ 22 GB. Estimated pre-flight, hard rejected if exceeded.
+4. **Bounds.** Param count: sprint 20-80M, promotion 60-130M (post-second-amendment; tightened upper bound after the BPE token budget was known). Wall clock: sprint ≤ 6 min, promotion ≤ 4h. Peak VRAM: ≤ 22 GB. Estimated pre-flight, hard rejected if exceeded.
 5. **Deterministic eval policy.** Section 5.
 
 ### 7.5 What's not enforced (deferred — see §10)
@@ -509,7 +511,7 @@ Phase 1 is complete when **all** are true:
 | Auto-triggered advisor council | If structural changes keep regressing |
 | Parallel experiments via worktrees | When single-threaded throughput is the bottleneck |
 | Multi-variety models (Crimean / Nogay / Chagatai) | After `asena-base` stable; each gets own repo + tokenizer |
-| Bigger model sizes (>350M) | After compute beyond single 4090 |
+| Bigger model sizes (>130M) | After corpus expands beyond ~30M unique BPE tokens (Phase-1.5 amendment) |
 | DPO / RLHF | Out of scope indefinitely; SFT first |
 
 ## 11. Risks and mitigations
@@ -524,7 +526,7 @@ Phase 1 is complete when **all** are true:
 | 6 | Tokenizer drift invalidates prior experiments | Freeze with hash checks; unfreeze is destructive on purpose |
 | 7 | Kimi hallucinates papers/techniques | Eval rejects bad ideas cheaply; protected-paths guard limits blast radius |
 | 8 | Register mixing (classical/late/Tanzimat) | Eval targets late-Tanzimat; data mix is agent-tunable; smoke prompts surface confusion |
-| 9 | Capability misalignment ("does it chat?") | Model card is explicit: 200M base LM, not chatbot |
+| 9 | Capability misalignment ("does it chat?") | Model card is explicit: ~80M base LM, not chatbot |
 | 10 | Corpus assembly delay | Decoupled: Phase 1 can be implemented against the first 100MB of corpus; remaining ingest in parallel |
 | 11 | Git state corruption from concurrent edits | Single-threaded loop in v1; parallelism is Phase 2 |
 | 12 | bf16 nondeterminism | `torch.use_deterministic_algorithms(True)`; noise-floor in policy accepts residual variance |
@@ -546,7 +548,7 @@ Patches importing/defining are rejected:
   torch.distributed, MoE/MixtureOfExperts, mamba, s4, hyena, encoder modules.
 
 ## Bounds enforced pre-GPU
-  param count: sprint 20-80M, promotion 100-350M
+  param count: sprint 20-80M, promotion 60-130M
   wall clock:  sprint ≤ 6 min, promotion ≤ 48h
   peak VRAM:   ≤ 22 GB
 

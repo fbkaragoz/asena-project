@@ -4,7 +4,7 @@ model:
   n_layers: 6
   n_embd: 384
   n_head: 6
-  n_kv_heads: 2
+  n_kv_heads: 3
   mlp_ratio: 2.67
   rope_theta: 10000.0
   tie_embeddings: true

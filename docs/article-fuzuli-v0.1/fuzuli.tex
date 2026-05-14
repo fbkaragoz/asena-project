@@ -1,0 +1,703 @@
+\documentclass[11pt,a4paper]{article}
+
+% --- packages -----------------------------------------------------------------
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{microtype}
+\usepackage{lmodern}
+\usepackage[margin=1in]{geometry}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{hyperref}
+\usepackage{xcolor}
+\usepackage{caption}
+\usepackage{enumitem}
+\usepackage[numbers,square]{natbib}
+
+\hypersetup{
+  colorlinks=true,
+  linkcolor=blue!50!black,
+  citecolor=blue!40!black,
+  urlcolor=blue!50!black,
+}
+
+\captionsetup{font=small, labelfont=bf, skip=4pt}
+\setlength{\parskip}{0.4em}
+\setlength{\parindent}{0pt}
+
+\newcommand{\graphicsdir}{assets}
+
+% --- title block --------------------------------------------------------------
+\title{\textbf{Fuzuli v0.1} \\[0.3em]
+  \large A from-scratch Latinized Ottoman Turkish language model}
+
+\author{
+  Fatih Burak Karagöz\thanks{Contact: \texttt{fatih@cdli.ai}} \\[0.2em]
+  \normalsize\textsc{CDLI}\thanks{CDLI is an independent laboratory for AI
+    products and systems. \texttt{cdli.ai}.} \\
+  \normalsize Istanbul, Turkey
+}
+
+\date{May 2026}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+\noindent
+\textbf{Fuzuli v0.1} is an 84-million-parameter decoder-only language model
+trained from scratch on Latinized post-1500 Ottoman Turkish. The training
+corpus consists of 24,253 OCR-cleaned pages (70.1 million characters,
+${\approx}\,8$ million unique tokens under a custom 24,000-token BPE
+vocabulary) drawn from 59 distinct historical documents — among them the full
+available \emph{Seyahatnâme} of Evliya Çelebi, the complete 25-volume run of
+the late-Ottoman periodicals \emph{Sebilürreşad} and \emph{Sırat-ı Müstakim},
+and 25 individual classical and late-classical works ranging from Necati
+Bey's \emph{Dîvân} (1500) to \emph{Üç Devirde Gördüklerim} (1866). No
+foreign weights were inherited; no model was fine-tuned. The tokenizer, the
+training data, and the model weights are all produced end-to-end inside the
+project. This first version is released as a research artifact, not a
+production tool. It demonstrates that a small from-scratch Ottoman language
+model is feasible at the current data scale, and it documents an
+\emph{autoresearch} methodology --- a deterministic factory paired with an
+LLM-based research agent under strict eval-policy control --- that produced
+six baseline-improving recipes out of 356 candidate experiments in the
+model's first 24 hours of life.
+\end{abstract}
+
+% =============================================================================
+\section{Why Ottoman Turkish, why from scratch}
+% =============================================================================
+
+Ottoman Turkish is not a single language, it is six centuries of overlapping
+registers --- classical \emph{dîvân} poetry, \emph{seyahatnâme} travel prose,
+\emph{tezkire} biographical compilations, late-Ottoman periodical journalism,
+\emph{risâle} religious treatises --- written across a script transition
+(Arabic-letter to Latin-letter, formalized in 1928) that broke continuity for
+most modern computational tools. The corpus that does exist in
+machine-readable Latinized form is small, scattered across academic
+websites, and rarely curated for language modeling.
+
+Fine-tuning a multilingual model is the easy path; it is also the path that
+bakes in modern Turkish bias and imports tokenization choices made for
+languages that share almost no morphology with Ottoman. The decision here is
+the harder one: own the tokenizer, own the data pipeline, own every weight
+from the first matmul forward. The cost is a smaller model trained on less
+data; the benefit is an artifact that is unambiguously \emph{of} the corpus
+it was trained on. This stance follows a wider tradition of from-scratch
+low-resource language models --- BERTurk~\citep{schweter2020berturk}, the
+OSCAR-trained European national models~\citep{suarez2019oscar}, and
+curated-corpus small-LM training in the spirit of
+TinyStories~\citep{eldan2023tinystories} --- which have repeatedly
+demonstrated that a smaller, language-faithful model trained on a curated
+in-domain corpus outperforms a larger multilingual model fine-tuned on the
+same downstream task.
+
+\subsection{A note on prior work}
+
+Fuzuli continues a line of work I have contributed to on the computational
+treatment of Ottoman Turkish. In \emph{Towards a Clean Text Corpus for
+Ottoman Turkish}~\citep{karagoz2024towards}, my co-authors and I constructed
+an initial cleaned Ottoman corpus and used it for \textbf{continual
+pre-training} of BERTurk~\citep{schweter2020berturk}, demonstrating that
+even modest amounts of in-domain text can adapt a Modern Turkish encoder to
+a historical variant for downstream tasks such as named entity recognition.
+The cleaning methodology developed there --- regex-based normalization,
+handling of intertwined bidirectional Arabic/Latin script, private-use-area
+character mapping, dehyphenation --- is the direct predecessor of
+Section~\ref{sec:corpus}'s four-stage pipeline.
+
+The broader infrastructure effort I co-author with the Boğaziçi NLP group,
+\emph{Building Foundations for Natural Language Processing of Historical
+Turkish: Resources and Models}~\citep{ozates2025foundations}, introduced the
+\textbf{HisTR} dataset, the \textbf{OTA-BOUN} Universal Dependencies
+treebank, and the \textbf{OTC} corpus, alongside fine-tuned task models
+published under the \texttt{bucolin} organization on HuggingFace. That work
+establishes concrete downstream baselines for historical Turkish --- NER F1
+of \textbf{90.29} on HisTR, dependency-parsing LAS of \textbf{73.79} on
+OTA-BOUN, POS F1 of \textbf{94.98} --- against which a from-scratch
+decoder-only successor can be measured.
+
+Fuzuli takes the next step in that programme. Rather than continually
+pre-training or fine-tuning Modern Turkish base models, it trains a
+decoder-only language model end-to-end on the historical variant alone ---
+with its own tokenizer, its own frozen evaluation harness, and no inherited
+weights. The progression is intentional: encoder fine-tuning answers
+\emph{can the existing infrastructure be adapted?}, and the answer is
+\emph{yes, partially}. From-scratch decoder pretraining answers a different
+question --- \emph{what does the language look like to a model that has
+never been told anything about Modern Turkish?} --- and the resulting
+artifact is, by construction, free of any Modern-Turkish prior.
+
+% =============================================================================
+\section{The corpus}\label{sec:corpus}
+% =============================================================================
+
+The training data is the union of two HuggingFace datasets I previously
+curated and published --- \texttt{fatihburakkaragoz/anadolu-ocr-corpus} (52
+documents, OCR'd via DeepSeek-OCR-2 at 200--300 DPI) and
+\texttt{fatihburakkaragoz/evliya-celebi-seyahatname-ocr} (7 books of Evliya
+Çelebi's travelogue) --- combined and processed through a four-stage
+cleaning pipeline:
+\begin{enumerate}[leftmargin=*,nosep]
+  \item Unicode NFC normalization, control-character stripping, whitespace
+    collapse.
+  \item Regex-based cleanup, length filters, modern-Turkish loanword ratio
+    filter.
+  \item MinHash near-duplicate removal at Jaccard $\geq 0.85$.
+  \item Per-document train/heldout split
+    (\texttt{sha256(source\_pdf)\,\%\,100\,<\,2} $\to$ heldout).
+\end{enumerate}
+
+After cleaning, the corpus contains \textbf{24{,}253 pages}, \textbf{70.1
+million characters}, and --- once tokenized with the project's own 24k BPE
+--- \textbf{7.97 million unique training tokens} plus 116{,}000 heldout
+tokens.
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=0.65\textwidth]{\graphicsdir/corpus_era.png}
+  \caption{Corpus composition by era (post-cleaning).}
+  \label{fig:era}
+\end{figure}
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=0.85\textwidth]{\graphicsdir/corpus_genre.png}
+  \caption{Corpus composition by genre.}
+  \label{fig:genre}
+\end{figure}
+
+Era is inferred from each document's date label or, when absent, from the
+publication-year heuristic encoded in the importer (with a hard-coded
+override for known periodicals whose filenames carry misleading print-run
+dates). The actual distribution --- 59\% classical, 40\% late Ottoman,
+1\% Tanzimat --- reflects the source material rather than a deliberate
+sampling choice.
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=\textwidth]{\graphicsdir/corpus_top_documents.png}
+  \caption{Top-20 documents in the post-cleaning corpus, by character count.}
+  \label{fig:topdocs}
+\end{figure}
+
+\subsection{Tokenizer: why train your own}\label{sec:tokenizer}
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=0.85\textwidth]{\graphicsdir/tokenizer_compression.png}
+  \caption{Tokenization efficiency on the Fuzuli training corpus (28.8\,M
+    characters of post-cleaning Latinized Ottoman). Custom BPE compresses
+    1.74$\times$ better than OpenAI's \texttt{cl100k\_base} on the same text.
+    Note: \texttt{cl100k} is not trained on Ottoman; the comparison is
+    intended only as a sanity-check on language-specific tokenizer benefit.}
+  \label{fig:tokenizer}
+\end{figure}
+
+A custom Byte-Pair Encoding tokenizer~\citep{sennrich2016bpe} of vocabulary
+24{,}000 was trained on the post-cleaning train split. On the same Ottoman
+corpus the custom BPE compresses at \textbf{3.61 chars/token}, against
+\textbf{2.07} for OpenAI's \texttt{cl100k\_base} and \textbf{2.38} for the
+newer \texttt{o200k\_base} --- a \textbf{1.74$\boldsymbol\times$ advantage}
+over a general-purpose tokenizer. The reason is straightforward: Ottoman
+morphology contains long agglutinative chains
+(\textit{-larımızdaki}, \textit{-mıştır}) and Persian/Arabic loan-stems
+(\textit{hüsn-ü}, \textit{eser-i}) that general-purpose tokenizers
+fragment into bytes, while a corpus-trained vocabulary captures them as
+single subword pieces. The 24k vocabulary size is on the smaller end (LLaMA-2
+uses 32k~\citep{touvron2023llama2}, GPT-4 uses 100k+); with only 8\,M
+unique training tokens, a 24k vocabulary places average occurrence per
+vocab entry at the lower edge of healthy BPE coverage ($\sim$330 instances
+per piece).
+
+% =============================================================================
+\section{Architecture}\label{sec:architecture}
+% =============================================================================
+
+Fuzuli is a standard post-2023 dense decoder transformer. None of its
+individual components are novel; what is intentional is the
+\emph{combination} and the discipline of refusing any architectural choice
+that requires a foreign-weight initializer.
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=\textwidth]{\graphicsdir/model_architecture.png}
+  \caption{Fuzuli architecture: one decoder block (left) and the full 12-block
+    stack (right). Standard post-2023 dense decoder transformer with
+    RMSNorm, RoPE, GQA, and SwiGLU.}
+  \label{fig:arch}
+\end{figure}
+
+\begin{table}[t]
+  \centering
+  \small
+  \begin{tabular}{ll}
+    \toprule
+    \textbf{Component} & \textbf{Choice} \\
+    \midrule
+    Layers & 12 \\
+    Hidden dim & 640 \\
+    Attention heads (Q) & 10 \\
+    KV heads (GQA) & 4 \\
+    Head dim & 64 \\
+    MLP & SwiGLU, mlp\_ratio 2.67 (hidden 1707) \\
+    Positional embedding & RoPE, $\theta = 10{,}000$ \\
+    Normalization & RMSNorm, no bias \\
+    Embedding tying & False (untied LM head) \\
+    Tokenizer & BPE, vocab 24{,}000, byte-fallback \\
+    Total parameters & $\approx$\,\textbf{84\,M} \\
+    \bottomrule
+  \end{tabular}
+  \caption{Fuzuli model dimensions.}
+  \label{tab:arch}
+\end{table}
+
+\subsection{Architectural choices in context}
+
+Each component reflects current best-practice in dense decoder models
+post-2023:
+\begin{itemize}[leftmargin=*,nosep]
+  \item \textbf{Decoder-only over encoder-decoder.} Following the GPT
+    family~\citep{brown2020gpt3} and contemporary open-weight LMs
+    (LLaMA~\citep{touvron2023llama2}). Encoder-decoder
+    architectures~\citep{raffel2020t5} dominate paired-task settings;
+    foundation-style next-token prediction has converged on decoder-only.
+  \item \textbf{Grouped-Query Attention (GQA).} From
+    \citet{ainslie2023gqa}: 4 KV heads against 10 query heads (a 2.5:1
+    ratio), aligning with the LLaMA-2 design.
+  \item \textbf{Rotary Position Embedding (RoPE).} From
+    \citet{su2021roformer}.
+  \item \textbf{SwiGLU MLP.} From \citet{shazeer2020glu}. The
+    \texttt{mlp\_ratio} of 2.67 is the standard SwiGLU ratio that matches
+    the parameter count of a GELU FFN at ratio 4.0.
+  \item \textbf{RMSNorm.} From \citet{zhang2019rmsnorm}.
+  \item \textbf{Untied input/output embeddings.} GPT-2 and many small
+    models tie embedding and unembedding matrices for parameter efficiency.
+    Fuzuli leaves them untied at the cost of an extra 15.4\,M parameters;
+    the autoresearch loop tried and rejected tied embeddings.
+  \item \textbf{No bias terms.} Following~\citep{touvron2023llama2}.
+\end{itemize}
+
+The training core itself is forked from Karpathy's
+\texttt{nanochat}~\citep{karpathy2024nanochat}, stripped to single-file
+form --- a deliberate choice that keeps the entire model definition readable
+in one file, which matters for an autoresearch loop where an LLM-based
+agent must comprehend and edit the training code.
+
+\subsection{Training}
+
+\begin{table}[t]
+  \centering\small
+  \begin{tabular}{ll}
+    \toprule
+    \textbf{Hyperparameter} & \textbf{Value} \\
+    \midrule
+    Total tokens seen & 60{,}000{,}000 ($\approx$ 7 epochs over 8\,M unique) \\
+    Sequence length & 2048 \\
+    Effective batch & $16 \times 4 = 64$ sequences \\
+    Optimizer & AdamW, $\beta = (0.9, 0.95)$, $\text{wd}=0.1$ \\
+    Learning rate & $6 \times 10^{-4}$ peak, cosine, 500 warmup steps \\
+    Precision & bfloat16 \\
+    Hardware & Single RTX 4090 \\
+    Wall clock & $\approx$\,1--2 hours \\
+    \bottomrule
+  \end{tabular}
+  \caption{Training hyperparameters for the promotion checkpoint.}
+  \label{tab:train}
+\end{table}
+
+This is significantly under Chinchilla-optimal~\citep{hoffmann2022chinchilla}
+--- for an 84\,M-parameter model the Chinchilla rule recommends $\approx$1.7
+billion unique tokens. Section~\ref{sec:scaling} returns to this point.
+
+% =============================================================================
+\section{Autoresearch methodology}\label{sec:autoresearch}
+% =============================================================================
+
+The recipe was not hand-tuned. Instead, an LLM-based research agent was
+given write access to a constrained surface --- \texttt{train/configs/}
+\texttt{sprint.yaml}, \texttt{train/train.py}, \texttt{train/arch.py},
+\texttt{data/cleaning\_rules.yaml} --- and instructed to propose one focused
+change per cycle, run a 5-minute sprint training, observe the results, and
+iterate. Around this agent sits a \textbf{factory}: a deterministic
+orchestrator that enforces protected-path immutability, scans patches for
+forbidden architectural patterns, runs the training, evaluates against four
+metrics, and applies a strict-no-trades accept/reject policy. Accepted
+experiments are merged into \texttt{main}; rejected experiments have their
+branches deleted but their full record preserved in a SQLite ledger.
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=\textwidth]{\graphicsdir/system_architecture.png}
+  \caption{Autoresearch system: the LLM agent proposes patches; the factory
+    enforces protected paths, runs the training subprocess, evaluates, and
+    applies the strict-no-trades policy; SQLite serves as cross-session
+    memory.}
+  \label{fig:sysarch}
+\end{figure}
+
+\subsection{Design choices in context}\label{sec:design}
+
+Most of Fuzuli's individual components are off-the-shelf. The autoresearch
+loop itself is part of a growing literature on LLM-driven scientific search:
+FunSearch~\citep{romeraparedes2024funsearch} demonstrated that an LLM in a
+closed evaluation loop could discover novel mathematical programs by
+mutating a designated function while a fixed evaluator gates accept/reject;
+AlphaEvolve~\citep{novikov2025alphaevolve} generalized this to algorithmic
+discovery on a wider problem class; Voyager~\citep{wang2023voyager} and
+Reflexion~\citep{shinn2023reflexion} established LLM-agent patterns for
+persistent memory and self-correction across episodes. What this project
+contributes is not the autoresearch primitive itself but a specific
+combination of design decisions tailored to the sub-Chinchilla single-GPU
+language-modeling setting:
+\begin{itemize}[leftmargin=*,nosep]
+  \item \textbf{Hard tier-based mutability.} The evaluation harness
+    (\texttt{eval/}), the tokenizer artifact, the orchestrator
+    (\texttt{factory/}), the CLI, and a handful of policy-defining files are
+    \emph{immutable to the agent}. Any patch that modifies them is rejected
+    at pre-flight by glob-based protected-path checking.
+  \item \textbf{Strict-no-trades policy combiner.} The accept rule is
+    purely Pareto: improve at least one metric beyond an improvement
+    threshold, regress no metric beyond a regression tolerance. There is no
+    scalar fitness function.
+  \item \textbf{SQLite ledger as agent memory.} Every experiment ever run
+    --- accept, reject\_eval, reject\_smoke, scores, deltas, reject reasons,
+    branch SHAs --- is preserved in \texttt{experiments.sqlite}. A fresh
+    agent session reads the ledger at startup and recovers full memory of
+    what has been tried.
+  \item \textbf{Forbidden-pattern scanning before GPU.} The agent cannot
+    import \texttt{torch.distributed}, define MoE, Mamba, S4, Hyena, or any
+    encoder module. The factory regex-scans every patch before allocating a
+    GPU; the wall-clock cost of bad patches is bounded to under 30 seconds.
+\end{itemize}
+
+The four metrics:
+\begin{itemize}[leftmargin=*,nosep]
+  \item \texttt{heldout\_ppl}: bits-per-byte on a frozen heldout split.
+  \item \texttt{lexicon\_score}: $-\log$ of the fraction of generated
+    tokens present in an Ottoman lexicon.
+  \item \texttt{flatness}: modern-Turkish loanword rate in generations.
+  \item \texttt{smoke}: fraction of fixed prompts failing deterministic
+    pass/fail rules.
+\end{itemize}
+
+% =============================================================================
+\section{Results from the first 24 hours}
+% =============================================================================
+
+Over its first 24 hours of operation, the agent ran \textbf{356
+experiments}: 6 accepts, 343 evaluation rejects, 7 smoke crashes (patches
+that broke training before the eval phase), and zero infrastructure errors.
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=\textwidth]{\graphicsdir/score_progression.png}
+  \caption{All four evaluators across 356 experiments. Stars mark accepted
+    baselines; the dark step lines trace the current baseline's score on
+    each metric. Most improvement happens in the first ${\sim}14$ experiments;
+    the metric trajectories then flatten.}
+  \label{fig:scores}
+\end{figure}
+
+The baseline trajectory makes the story visible: the productive period is
+the first ${\sim}14$ experiments, during which lexicon score crashes from
+10.05 to 2.85 --- a 71\% reduction driven primarily by a sequence-length
+change ($1024 \to 512$) and a weight-decay tightening ($0.1 \to 0.2$).
+Heldout perplexity barely moves throughout, suggesting the model converges
+to roughly the same data-distribution likelihood under any reasonable
+recipe.
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=\textwidth]{\graphicsdir/accept_rate.png}
+  \caption{Rolling 20-experiment accept rate. Peaks above 30\% in the early
+    cycles; collapses toward zero by experiment $\sim$50; after experiment
+    $\sim$200, no further accepted experiments at all.}
+  \label{fig:acceptrate}
+\end{figure}
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=0.95\textwidth]{\graphicsdir/reject_reasons.png}
+  \caption{Breakdown of rejection reasons across all non-accepts. PPL
+    regressions dominate; smoke crashes are seven cases where a patch broke
+    training before the eval phase.}
+  \label{fig:rejects}
+\end{figure}
+
+% =============================================================================
+\section{What the agent tried}
+% =============================================================================
+
+All 356 experiments were run on the \textbf{sprint configuration} --- a
+smaller proxy model ($n_\text{layers}=6$, $n_\text{embd}=384$,
+$n_\text{kv\_heads}=2$, $\approx$30\,M parameters, 25\,M training tokens,
+$\approx$76\,s wall clock) used to discover hyperparameter recipes that are
+then applied to the larger $\approx$84\,M-parameter promotion model in
+Section~\ref{sec:architecture}. This separation is by design: sprints are
+short enough for hundreds of cycles per day; promotions are 1--2 hours
+each. The autoresearch loop iterates only over sprints.
+
+Over the session, the agent traversed essentially the entire standard
+recipe-search playbook: model width, layer count, KV-head count, peak
+learning rate, learning-rate schedule (cosine vs constant), warmup-step
+count, weight decay, initialization standard deviation, embedding tying,
+dropout, sequence length, total training tokens, era data mix, random
+seed, and optimizer choice (AdamW vs Lion~\citep{chen2023lion}). Most
+productive accepts cluster around the early experiments.
+
+% =============================================================================
+\section{Diagnosis: data ceiling, not recipe ceiling}
+% =============================================================================
+
+The most informative single experiment is the one the agent ran toward the
+end, when it began varying only the random seed.
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=0.85\textwidth]{\graphicsdir/seed_variance.png}
+  \caption{Same recipe, five different \texttt{torch.manual\_seed} values.
+    Lexicon score swings from 2.85 (seed 42) to 9.96 (seed 1) --- a
+    ${\sim}3.5\times$ swing produced by initialization noise alone.}
+  \label{fig:seedvar}
+\end{figure}
+
+Five seeds, identical configuration. The lexicon score under seed 42 is
+2.85; under seed 1 it is 9.96. That variance is enormous relative to the
+0.05 improvement threshold the policy requires for acceptance. A run that
+happens to land in a ``good basin'' looks dramatically better than a run
+that lands in a ``bad basin,'' and no recipe lever consistently moves the
+model into the good basins. With only five seeds the evidence is
+suggestive rather than conclusive, but the pattern is consistent with the
+textbook signature of a \emph{data-starved training regime}.
+
+\subsection{Where Fuzuli sits in the scaling landscape}\label{sec:scaling}
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=\textwidth]{\graphicsdir/scaling_landscape.png}
+  \caption{Parameter count vs.\ unique training tokens (log-log) for Fuzuli
+    v0.1 and a panel of public reference points. The dashed line is the
+    Chinchilla~\citep{hoffmann2022chinchilla} compute-optimal ratio of 20
+    tokens/parameter; the shaded regions mark over- and under-trained
+    regimes. Fuzuli is firmly in the low-resource band alongside
+    TinyStories~\citep{eldan2023tinystories}. \emph{Note:} BERTurk is an
+    MLM-pretrained encoder; the Chinchilla curve was derived on CLM training,
+    so the BERTurk position is approximate.}
+  \label{fig:scaling}
+\end{figure}
+
+Chinchilla established that for compute-optimal training, the number of
+unique training tokens should scale roughly as $20\times$ the number of
+parameters. Fuzuli has \textbf{8\,M unique training tokens for 84\,M
+parameters --- a unique-data-to-parameter ratio of $\approx$0.095}, against
+the Chinchilla optimum of 20. That is roughly \textbf{$\mathbf{200\times}$
+under} the compute-optimal frontier. Counting training-token \emph{passes}
+across the $\sim$7 epochs raises the seen-token ratio to $\sim$0.71, but
+Chinchilla scaling is properly defined on unique data;
+\citet{muennighoff2023scaling} examine the data-constrained regime where
+multiple epochs partly but not fully recover the marginal value of
+additional unique data.
+
+The opposite end of the landscape is illustrative. LLaMA-2-7B was trained
+on 2 trillion tokens for 7 billion parameters~\citep{touvron2023llama2} ---
+a ratio of $\sim$286, fully $14\times$ \emph{over} the Chinchilla optimum.
+The modern best practice for production LMs is intentional overtraining;
+Fuzuli takes the opposite trade because there is no deployment-scale
+inference and there is no 2T-token Ottoman corpus.
+
+The corollary is that further sprint iteration on the current corpus will
+not produce meaningful gains. The recipe space is saturated; the data is
+the binding constraint.
+
+% =============================================================================
+\section{Honest limitations of v0.1}
+% =============================================================================
+
+The model \textbf{will}:
+\begin{itemize}[leftmargin=*,nosep]
+  \item generate plausible Ottoman-Turkish continuations for short prompts;
+  \item score perplexity on novel Ottoman text reliably enough for
+    OCR-confidence and era-proximity scoring;
+  \item provide useful Ottoman embeddings if a mean-pooling head is
+    attached;
+  \item demonstrate that a from-scratch Latinized Ottoman LM at this size
+    is feasible.
+\end{itemize}
+The model \textbf{will not}:
+\begin{itemize}[leftmargin=*,nosep]
+  \item produce coherent long-form generation; expect memorized 3--5-token
+    windows from the training corpus;
+  \item handle out-of-distribution text well --- Arabic-script Ottoman,
+    modern Turkish, conversational registers all degrade sharply;
+  \item exhibit world knowledge beyond what is implicit in the corpus;
+  \item replace human judgment on any historical-translation or
+    paleographic task.
+\end{itemize}
+This is a research artifact. Treat it as one.
+
+% =============================================================================
+\section{Roadmap}
+% =============================================================================
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=0.85\textwidth]{\graphicsdir/roadmap.png}
+  \caption{Corpus tokens and model size targets for v0.5 (M2) and v1.0 (M3).
+    Each version scales together with the corpus.}
+  \label{fig:roadmap}
+\end{figure}
+
+Future versions of Fuzuli scale together with the corpus. v0.5 targets
+$\sim$30\,M unique tokens at $\sim$120\,M parameters; v1.0 targets
+$\sim$50\,M unique tokens at $\sim$150\,M parameters. Corpus growth is the
+main bottleneck. Sources under consideration include the remaining un-OCR'd
+late-Ottoman periodicals (\emph{İkdam}, \emph{Tasvir-i Efkâr}, \emph{Mizan},
+\emph{Tercümân-ı Ahvâl}), Latinized Ottoman primary-source passages
+embedded in Turkish-studies dissertations available through the YÖK Tez
+archive, and academic encyclopedia entries from TDV İslâm Ansiklopedisi.
+
+A parallel encoder track (BERT-style~\citep{devlin2019bert} masked
+language-model pretraining on the same corpus) is also planned. Encoder
+objectives are substantially more sample-efficient than decoder objectives;
+the existing 8\,M tokens are comfortable for a 50--80\,M-parameter encoder.
+
+% =============================================================================
+\section*{License}
+% =============================================================================
+
+\begin{itemize}[leftmargin=*,nosep]
+  \item \textbf{Code}: Apache-2.0
+  \item \textbf{Model weights}: Apache-2.0
+  \item \textbf{Dataset}: CC-BY-4.0
+  \item \textbf{This article and its diagrams}: CC-BY-4.0
+\end{itemize}
+
+This work is released without external attribution claims. Source repository:
+\url{https://github.com/fbkaragoz/asena-project}.
+
+% =============================================================================
+\bibliographystyle{plainnat}
+\begin{thebibliography}{99}
+
+\bibitem[Ainslie et al.(2023)]{ainslie2023gqa}
+Ainslie, J., Lee-Thorp, J., de Jong, M., Zemlyanskiy, Y., Lebrón, F.,
+\& Sanghai, S. (2023).
+\newblock GQA: Training Generalized Multi-Query Transformer Models from Multi-Head Checkpoints.
+\newblock \emph{EMNLP 2023}.
+
+\bibitem[Brown et al.(2020)]{brown2020gpt3}
+Brown, T. B. \emph{et al.} (2020).
+\newblock Language Models are Few-Shot Learners.
+\newblock \emph{NeurIPS 2020}.
+
+\bibitem[Chen et al.(2023)]{chen2023lion}
+Chen, X. \emph{et al.} (2023).
+\newblock Symbolic Discovery of Optimization Algorithms.
+\newblock \emph{arXiv:2302.06675}.
+
+\bibitem[Devlin et al.(2019)]{devlin2019bert}
+Devlin, J., Chang, M.-W., Lee, K., \& Toutanova, K. (2019).
+\newblock BERT: Pre-training of Deep Bidirectional Transformers for Language Understanding.
+\newblock \emph{NAACL 2019}.
+
+\bibitem[Eldan \& Li(2023)]{eldan2023tinystories}
+Eldan, R., \& Li, Y. (2023).
+\newblock TinyStories: How Small Can Language Models Be and Still Speak Coherent English?
+\newblock \emph{arXiv:2305.07759}.
+
+\bibitem[Hoffmann et al.(2022)]{hoffmann2022chinchilla}
+Hoffmann, J. \emph{et al.} (2022).
+\newblock Training Compute-Optimal Large Language Models.
+\newblock \emph{arXiv:2203.15556} (Chinchilla).
+
+\bibitem[Karagöz et al.(2024)]{karagoz2024towards}
+Karagöz, F., Doğan, B., \& Özateş, Ş.~B. (2024).
+\newblock Towards a Clean Text Corpus for Ottoman Turkish.
+\newblock \emph{Proceedings of the First Workshop on Natural Language Processing for Turkic Languages (SIGTURK 2024)}, 62--70.
+
+\bibitem[Karpathy(2024)]{karpathy2024nanochat}
+Karpathy, A. (2024--).
+\newblock nanoGPT / nanochat training core.
+\newblock \url{https://github.com/karpathy/nanoGPT}.
+
+\bibitem[Muennighoff et al.(2023)]{muennighoff2023scaling}
+Muennighoff, N. \emph{et al.} (2023).
+\newblock Scaling Data-Constrained Language Models.
+\newblock \emph{NeurIPS 2023}.
+
+\bibitem[Novikov et al.(2025)]{novikov2025alphaevolve}
+Novikov, A. \emph{et al.} (2025).
+\newblock AlphaEvolve: A coding agent for scientific and algorithmic discovery.
+\newblock \emph{DeepMind / arXiv}.
+
+\bibitem[Özateş et al.(2025)]{ozates2025foundations}
+Özateş, Ş.~B., Tıraş, T.~E., Adak, E.~E., Doğan, B., Karagöz, F.~B.,
+Genç, E.~E., \& Taşdemir, E.~F.~B. (2025).
+\newblock Building Foundations for Natural Language Processing of Historical Turkish: Resources and Models.
+\newblock \emph{arXiv:2501.04828}.
+
+\bibitem[Raffel et al.(2020)]{raffel2020t5}
+Raffel, C. \emph{et al.} (2020).
+\newblock Exploring the Limits of Transfer Learning with a Unified Text-to-Text Transformer (T5).
+\newblock \emph{JMLR 21(140)}.
+
+\bibitem[Romera-Paredes et al.(2024)]{romeraparedes2024funsearch}
+Romera-Paredes, B. \emph{et al.} (2024).
+\newblock Mathematical discoveries from program search with large language models (FunSearch).
+\newblock \emph{Nature 625}, 468--475.
+
+\bibitem[Schweter(2020)]{schweter2020berturk}
+Schweter, S. (2020).
+\newblock BERTurk — BERT models for Turkish.
+\newblock \emph{Zenodo}. doi:10.5281/zenodo.3770924.
+
+\bibitem[Sennrich et al.(2016)]{sennrich2016bpe}
+Sennrich, R., Haddow, B., \& Birch, A. (2016).
+\newblock Neural Machine Translation of Rare Words with Subword Units.
+\newblock \emph{ACL 2016}.
+
+\bibitem[Shazeer(2020)]{shazeer2020glu}
+Shazeer, N. (2020).
+\newblock GLU Variants Improve Transformer.
+\newblock \emph{arXiv:2002.05202}.
+
+\bibitem[Shinn et al.(2023)]{shinn2023reflexion}
+Shinn, N., Cassano, F., Berman, E., Gopinath, A., Narasimhan, K., \& Yao, S. (2023).
+\newblock Reflexion: Language Agents with Verbal Reinforcement Learning.
+\newblock \emph{NeurIPS 2023}.
+
+\bibitem[Su et al.(2021)]{su2021roformer}
+Su, J., Lu, Y., Pan, S., Murtadha, A., Wen, B., \& Liu, Y. (2021).
+\newblock RoFormer: Enhanced Transformer with Rotary Position Embedding.
+\newblock \emph{arXiv:2104.09864} (RoPE).
+
+\bibitem[Suárez et al.(2019)]{suarez2019oscar}
+Suárez, P.~J.~O., Romary, L., \& Sagot, B. (2019).
+\newblock Asynchronous Pipeline for Processing Huge Corpora on Medium to Low Resource Infrastructures (OSCAR).
+\newblock \emph{Workshop on Challenges in the Management of Large Corpora}.
+
+\bibitem[Touvron et al.(2023)]{touvron2023llama2}
+Touvron, H. \emph{et al.} (2023).
+\newblock LLaMA 2: Open Foundation and Fine-Tuned Chat Models.
+\newblock \emph{arXiv:2307.09288}.
+
+\bibitem[Vaswani et al.(2017)]{vaswani2017attention}
+Vaswani, A. \emph{et al.} (2017).
+\newblock Attention Is All You Need.
+\newblock \emph{NeurIPS 2017}.
+
+\bibitem[Wang et al.(2023)]{wang2023voyager}
+Wang, G. \emph{et al.} (2023).
+\newblock Voyager: An Open-Ended Embodied Agent with Large Language Models.
+\newblock \emph{arXiv:2305.16291}.
+
+\bibitem[Zhang \& Sennrich(2019)]{zhang2019rmsnorm}
+Zhang, B., \& Sennrich, R. (2019).
+\newblock Root Mean Square Layer Normalization.
+\newblock \emph{NeurIPS 2019}.
+
+\end{thebibliography}
+
+\end{document}

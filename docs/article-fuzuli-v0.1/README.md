@@ -1,6 +1,10 @@
 # Fuzuli v0.1 — Building a Latinized Ottoman Turkish Language Model from Scratch
 
-**Fatih Burak Karagöz** — May 2026
+**Fatih Burak Karagöz**
+**CDLI** — `fatih@cdli.ai` · `cdli.ai`
+May 2026
+
+> *CDLI is an independent laboratory for AI products and systems. Fuzuli v0.1 is its first public research release.*
 
 ---
 

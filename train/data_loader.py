@@ -28,6 +28,7 @@ class ParquetTokenStream:
         self.batch_size = batch_size
         self.rng = random.Random(seed)
         self.tokenizer = Tokenizer.from_file(str(tokenizer_path))
+        self.bos_id = self.tokenizer.token_to_id("<|bos|>")
         self.eos_id = self.tokenizer.token_to_id("<|eos|>")
 
         rows_by_era: dict[str, list[str]] = {}
@@ -55,6 +56,7 @@ class ParquetTokenStream:
         while True:
             while len(buf) < need:
                 ids = self.tokenizer.encode(self._sample_text()).ids
+                buf.append(self.bos_id)
                 buf.extend(ids)
                 if self.eos_id is not None:
                     buf.append(self.eos_id)

@@ -20,6 +20,7 @@ from tools.publish_baseline import (
     load_baseline_metadata,
     load_corpus_stats,
     load_arch_config,
+    load_eval_full,
     generate_model_card,
     stage_release_folder,
     NoBaselineError,
@@ -253,6 +254,76 @@ def test_generate_model_card_omits_samples_section_when_none():
     card = generate_model_card(_meta(samples=None))
     # Should NOT contain a "Sample generations" subsection
     assert "## Sample generations" not in card
+
+
+def test_generate_model_card_body_has_no_8space_indented_prose():
+    """Regression: a previous bug interpolated 0-indent tables into an 8-space
+    indented dedent() block, defeating dedent and rendering the whole body as
+    a code block on HuggingFace. No prose line should start with 8+ spaces."""
+    card = generate_model_card(_meta())
+    body = card.split("\n---\n", 1)[1]
+    offending = [
+        line for line in body.splitlines()
+        if line.startswith("        ") and line.strip()
+    ]
+    assert not offending, (
+        "found body lines indented with 8+ spaces (would render as code block "
+        f"on HF):\n  " + "\n  ".join(offending[:5])
+    )
+
+
+def test_generate_model_card_renders_smoke_dict_samples_with_verdict():
+    """Samples may also be dicts with prompt_id/generation/passed/reason
+    (the shape produced by cli.py eval --include-samples). The card should
+    render the prompt, completion, and a pass/fail verdict."""
+    card = generate_model_card(_meta(samples=[
+        {
+            "prompt_id": "tanzimat_fermani",
+            "generation": "Tanzimat fermanı bu kadar ma'mûr u müzeyyen ve müzeyyen ve müzeyyen…",
+            "passed": False,
+            "reason": "5gram repetition",
+        },
+        {
+            "prompt_id": "bedestende_sarraflar",
+            "generation": "Şehrin bedesteninde yirmi bin kadar...",
+            "passed": True,
+            "reason": "ok",
+        },
+    ]))
+    assert "Tanzimat fermanı" in card
+    assert "Şehrin bedesteninde" in card
+    assert "5gram repetition" in card or "rejected" in card.lower()
+    assert "accepted" in card.lower() or "✓" in card or "passed" in card.lower()
+
+
+# ---------------------------------------------------------------------------
+# load_eval_full
+# ---------------------------------------------------------------------------
+
+def test_load_eval_full_returns_scores_and_smoke_results(tmp_path):
+    """eval-full.json (the real promotion eval output) should be parsed into
+    a dict with the four scalar scores plus a list of smoke results."""
+    cp = tmp_path / "checkpoints" / "fuzuli-v0.1"
+    cp.mkdir(parents=True)
+    (cp / "eval-full.json").write_text(
+        '{"ppl_bpb": 1.929, "lexicon": 9.873, "flatness": 0.011, "smoke": 0.8, '
+        '"smoke_results": [{"prompt_id": "p", "generation": "g", '
+        '"passed": false, "reason": "loanword: x"}]}'
+    )
+
+    eval_data = load_eval_full(cp)
+    assert eval_data["score_ppl_bpb"] == pytest.approx(1.929)
+    assert eval_data["score_lexicon"] == pytest.approx(9.873)
+    assert eval_data["score_flatness"] == pytest.approx(0.011)
+    assert eval_data["score_smoke"] == pytest.approx(0.8)
+    assert len(eval_data["smoke_results"]) == 1
+    assert eval_data["smoke_results"][0]["prompt_id"] == "p"
+
+
+def test_load_eval_full_returns_none_when_missing(tmp_path):
+    cp = tmp_path / "checkpoints" / "fuzuli-v0.1"
+    cp.mkdir(parents=True)
+    assert load_eval_full(cp) is None
 
 
 def test_generate_model_card_has_citation_block():

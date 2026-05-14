@@ -279,7 +279,7 @@ def publish_baseline_cmd(checkpoint, repo_id, version, public, include_article, 
     """
     from tools.publish_baseline import (
         load_baseline_metadata, load_corpus_stats, load_arch_config,
-        generate_model_card, stage_release_folder, upload_to_hf,
+        load_eval_full, generate_model_card, stage_release_folder, upload_to_hf,
     )
     from factory.bounds import estimate_param_count
 
@@ -293,6 +293,12 @@ def publish_baseline_cmd(checkpoint, repo_id, version, public, include_article, 
         mlp_ratio=arch["mlp_ratio"], vocab_size=24000,
         tied=arch["tie_embeddings"],
     )
+    eval_full = load_eval_full(checkpoint)
+    samples = None
+    if eval_full is not None:
+        for k in ("score_ppl_bpb", "score_lexicon", "score_flatness", "score_smoke"):
+            baseline[k] = eval_full[k]
+        samples = eval_full["smoke_results"] or None
     meta = {
         "model_name": "fuzuli-base", "version": version,
         "params": params, "git_sha": baseline["git_sha"],
@@ -306,7 +312,7 @@ def publish_baseline_cmd(checkpoint, repo_id, version, public, include_article, 
         ],
         "license": "apache-2.0",
         "author": "Fatih Burak Karagöz", "affiliation": "CDLI",
-        "arxiv_id": arxiv_id, "samples": None, "repo_id": repo_id,
+        "arxiv_id": arxiv_id, "samples": samples, "repo_id": repo_id,
     }
     card = generate_model_card(meta)
     article_dir = Path("docs/article-fuzuli-v0.1") if include_article else None

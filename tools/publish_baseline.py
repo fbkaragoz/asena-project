@@ -8,6 +8,7 @@ HuggingFace upload step is exercised manually with --dry-run.
 """
 from __future__ import annotations
 
+import json
 import shutil
 import sqlite3
 from glob import glob
@@ -77,6 +78,26 @@ def load_corpus_stats(train_glob: str, tokenizer_path: str | Path | None = None)
     return stats
 
 
+def load_eval_full(checkpoint_dir: Path | str) -> dict[str, Any] | None:
+    """Read eval-full.json next to the checkpoint, if present.
+
+    Returns scores remapped to the same `score_*` keys used by the SQLite
+    baseline row, plus the raw smoke_results list. Returns None if the file
+    is absent — caller should fall back to the ledger baseline.
+    """
+    p = Path(checkpoint_dir) / "eval-full.json"
+    if not p.exists():
+        return None
+    raw = json.loads(p.read_text())
+    return {
+        "score_ppl_bpb": raw["ppl_bpb"],
+        "score_lexicon": raw["lexicon"],
+        "score_flatness": raw["flatness"],
+        "score_smoke": raw["smoke"],
+        "smoke_results": raw.get("smoke_results", []),
+    }
+
+
 def load_arch_config(config_path: Path | str) -> dict[str, Any]:
     """Flatten the promotion-config model + training dicts into a single arch dict."""
     cfg = yaml.safe_load(Path(config_path).read_text())
@@ -129,132 +150,124 @@ def generate_model_card(meta: dict[str, Any]) -> str:
             f"\n**Paper:** [arXiv:{arxiv_id}](https://arxiv.org/abs/{arxiv_id})\n"
         )
 
-    scores_md = dedent(f"""\
-        | Metric | Value |
-        |---|---|
-        | Heldout perplexity (bits/byte) | **{baseline['score_ppl_bpb']:.4f}** |
-        | Ottoman lexicon score (lower = more Ottoman flavor) | **{baseline['score_lexicon']:.4f}** |
-        | Modern-Turkish flatness (loanword rate) | **{baseline['score_flatness']:.4f}** |
-        | Smoke fail rate (50 prompts) | **{baseline['score_smoke']:.2f}** |
-    """)
+    scores_md = (
+        "| Metric | Value |\n"
+        "|---|---|\n"
+        f"| Heldout perplexity (bits/byte) | **{baseline['score_ppl_bpb']:.4f}** |\n"
+        f"| Ottoman lexicon score (lower = more Ottoman flavor) | **{baseline['score_lexicon']:.4f}** |\n"
+        f"| Modern-Turkish flatness (loanword rate) | **{baseline['score_flatness']:.4f}** |\n"
+        f"| Smoke fail rate (5 prompts) | **{baseline['score_smoke']:.2f}** |\n"
+    )
 
-    arch_md = dedent(f"""\
-        | Component | Choice |
-        |---|---|
-        | Layers | {arch['n_layers']} |
-        | Hidden dim | {arch['n_embd']} |
-        | Attention heads (Q) | {arch['n_head']} |
-        | KV heads (GQA) | {arch['n_kv_heads']} |
-        | MLP | SwiGLU, mlp_ratio {arch['mlp_ratio']} |
-        | Positional embedding | RoPE |
-        | Normalization | RMSNorm, no bias |
-        | Tokenizer | BPE, vocab 24,000 |
-        | Embedding tying | {arch['tie_embeddings']} |
-        | Total parameters | **~{_format_params(meta['params'])}** |
-    """)
+    arch_md = (
+        "| Component | Choice |\n"
+        "|---|---|\n"
+        f"| Layers | {arch['n_layers']} |\n"
+        f"| Hidden dim | {arch['n_embd']} |\n"
+        f"| Attention heads (Q) | {arch['n_head']} |\n"
+        f"| KV heads (GQA) | {arch['n_kv_heads']} |\n"
+        f"| MLP | SwiGLU, mlp_ratio {arch['mlp_ratio']} |\n"
+        "| Positional embedding | RoPE |\n"
+        "| Normalization | RMSNorm, no bias |\n"
+        "| Tokenizer | BPE, vocab 24,000 |\n"
+        f"| Embedding tying | {arch['tie_embeddings']} |\n"
+        f"| Total parameters | **~{_format_params(meta['params'])}** |\n"
+    )
 
-    corpus_md = dedent(f"""\
-        | | |
-        |---|---|
-        | Documents | {corpus['documents']} |
-        | Pages (post-cleaning) | {corpus['rows']:,} |
-        | Characters | {corpus['chars']:,} |
-        | Unique BPE tokens | **{corpus.get('tokens', 0):,}** |
-    """)
+    corpus_md = (
+        "| | |\n"
+        "|---|---|\n"
+        f"| Documents | {corpus['documents']} |\n"
+        f"| Pages (post-cleaning) | {corpus['rows']:,} |\n"
+        f"| Characters | {corpus['chars']:,} |\n"
+        f"| Unique BPE tokens | **{corpus.get('tokens', 0):,}** |\n"
+    )
 
     samples_md = ""
     if samples:
         lines = ["## Sample generations\n"]
-        for prompt, completion in samples:
-            lines.append(f"**Prompt:** `{prompt}`\n")
-            lines.append(f"**Completion:** {completion}\n")
+        for s in samples:
+            if isinstance(s, dict):
+                prompt_id = s.get("prompt_id", "")
+                completion = s.get("generation", "")
+                passed = s.get("passed", True)
+                reason = s.get("reason", "")
+                verdict = ("✓ accepted" if passed
+                           else f"✗ rejected — {reason}" if reason
+                           else "✗ rejected")
+                lines.append(f"**Prompt id:** `{prompt_id}`  ")
+                lines.append(f"**Completion:** {completion}  ")
+                lines.append(f"**Verdict:** {verdict}\n")
+            else:
+                prompt, completion = s
+                lines.append(f"**Prompt:** `{prompt}`  ")
+                lines.append(f"**Completion:** {completion}\n")
         samples_md = "\n".join(lines) + "\n"
 
     sha_short = meta["git_sha"][:8] if meta.get("git_sha") else "unknown"
     arxiv_note = f"arXiv:{arxiv_id}" if arxiv_id else "HuggingFace Hub release"
-    citation = dedent(f"""\
-        ```bibtex
-        @misc{{karagoz2026fuzuli,
-          title  = {{Fuzuli {meta['version']} — A from-scratch Latinized Ottoman Turkish language model}},
-          author = {{Karagöz, Fatih Burak}},
-          year   = {{2026}},
-          note   = {{CDLI technical report; {arxiv_note}}},
-          url    = {{https://huggingface.co/{_repo_id_from_meta(meta)}}}
-        }}
-        ```
-    """)
+    citation = (
+        "```bibtex\n"
+        "@misc{karagoz2026fuzuli,\n"
+        f"  title  = {{Fuzuli {meta['version']} — A from-scratch Latinized Ottoman Turkish language model}},\n"
+        "  author = {Karagöz, Fatih Burak},\n"
+        "  year   = {2026},\n"
+        f"  note   = {{CDLI technical report; {arxiv_note}}},\n"
+        f"  url    = {{https://huggingface.co/{_repo_id_from_meta(meta)}}}\n"
+        "}\n"
+        "```\n"
+    )
 
-    body = dedent(f"""\
-        # {meta['model_name'].title().replace('-', ' ')} {meta['version']}
-        ## A from-scratch decoder-only language model for Latinized Ottoman Turkish
-
-        **{meta['author']}** · {meta.get('affiliation', 'Independent')}{arxiv_block}
-
-        Fuzuli is a small (~{_format_params(meta['params'])} parameter), decoder-only
-        language model trained **from scratch** on a curated corpus of Latinized Ottoman
-        Turkish texts. No foreign weights were inherited; no model was fine-tuned.
-        Tokenizer, training data, and weights are all produced end-to-end in the project.
-
-        This is a **research artifact**, not a production tool. See the limitations
-        section before using it.
-
-        ## Evaluation scores
-
-        Frozen heldout split, four-evaluator harness, strict-no-trades policy.
-
-        {scores_md}
-
-        Baseline checkpoint git SHA: `{sha_short}`
-
-        ## Architecture
-
-        Standard post-2023 dense decoder transformer (RoPE + GQA + SwiGLU + RMSNorm).
-
-        {arch_md}
-
-        ## Training corpus
-
-        {corpus_md}
-
-        Composed of: Evliya Çelebi *Seyahatnâme* (7 books), 25-volume *Sebilürreşad* /
-        *Sırat-ı Müstakim* late-Ottoman periodicals, and 25 classical / late-classical
-        works (Dîvâns, Mecmuas, historiographies). All Latinized; sourced from the two
-        HuggingFace datasets listed in the frontmatter.
-
-        {samples_md}## Limitations
-
-        Fuzuli v0.1 is trained at roughly **200× under Chinchilla-optimal** (8 M unique
-        tokens for 84 M parameters; Chinchilla recommends ~1.7 B tokens). Expect:
-
-        - Plausible short completions (one-sentence) in Ottoman-Turkish style.
-        - Useful for perplexity scoring of historical Turkish text.
-        - **Not** suitable for long-form generation (will memorize 3–5-token windows).
-        - **Not** capable on Arabic-script Ottoman, modern Turkish, or conversational input.
-        - **Not** for any historical-translation or paleographic task without human review.
-
-        ## How to use
-
-        Custom architecture (see `train/arch.py` in the source repo). For now, load via:
-
-        ```python
-        import torch
-        from huggingface_hub import hf_hub_download
-
-        weights = hf_hub_download("{_repo_id_from_meta(meta)}", "model.pt")
-        state = torch.load(weights, map_location="cpu")
-        # See train/arch.py:AsenaModel for the config schema.
-        ```
-
-        A `transformers`-compatible loader is planned for v0.5.
-
-        ## Citation
-
-        {citation}
-
-        ## License
-
-        Apache-2.0 (code + weights). Training data is CC-BY-4.0; the article is CC-BY-4.0.
-        """)
+    title = meta["model_name"].title().replace("-", " ")
+    repo_id = _repo_id_from_meta(meta)
+    body = (
+        f"# {title} {meta['version']}\n"
+        "## A from-scratch decoder-only language model for Latinized Ottoman Turkish\n\n"
+        f"**{meta['author']}** · {meta.get('affiliation', 'Independent')}{arxiv_block}\n\n"
+        f"Fuzuli is a small (~{_format_params(meta['params'])} parameter), decoder-only "
+        "language model trained **from scratch** on a curated corpus of Latinized Ottoman "
+        "Turkish texts. No foreign weights were inherited; no model was fine-tuned. "
+        "Tokenizer, training data, and weights are all produced end-to-end in the project.\n\n"
+        "This is a **research artifact**, not a production tool. See the limitations "
+        "section before using it.\n\n"
+        "## Evaluation scores\n\n"
+        "Frozen heldout split, four-evaluator harness, strict-no-trades policy.\n\n"
+        f"{scores_md}\n"
+        f"Baseline checkpoint git SHA: `{sha_short}`\n\n"
+        "## Architecture\n\n"
+        "Standard post-2023 dense decoder transformer (RoPE + GQA + SwiGLU + RMSNorm).\n\n"
+        f"{arch_md}\n"
+        "## Training corpus\n\n"
+        f"{corpus_md}\n"
+        "Composed of: Evliya Çelebi *Seyahatnâme* (7 books), 25-volume *Sebilürreşad* / "
+        "*Sırat-ı Müstakim* late-Ottoman periodicals, and 25 classical / late-classical "
+        "works (Dîvâns, Mecmuas, historiographies). All Latinized; sourced from the two "
+        "HuggingFace datasets listed in the frontmatter.\n\n"
+        f"{samples_md}"
+        "## Limitations\n\n"
+        f"Fuzuli {meta['version']} is trained at roughly **200× under Chinchilla-optimal** "
+        "(8 M unique tokens for 84 M parameters; Chinchilla recommends ~1.7 B tokens). "
+        "Expect:\n\n"
+        "- Plausible short completions (one-sentence) in Ottoman-Turkish style.\n"
+        "- Useful for perplexity scoring of historical Turkish text.\n"
+        "- **Not** suitable for long-form generation (will memorize 3–5-token windows).\n"
+        "- **Not** capable on Arabic-script Ottoman, modern Turkish, or conversational input.\n"
+        "- **Not** for any historical-translation or paleographic task without human review.\n\n"
+        "## How to use\n\n"
+        "Custom architecture (see `train/arch.py` in the source repo). For now, load via:\n\n"
+        "```python\n"
+        "import torch\n"
+        "from huggingface_hub import hf_hub_download\n\n"
+        f'weights = hf_hub_download("{repo_id}", "model.pt")\n'
+        'state = torch.load(weights, map_location="cpu")\n'
+        "# See train/arch.py:AsenaModel for the config schema.\n"
+        "```\n\n"
+        "A `transformers`-compatible loader is planned for v0.5.\n\n"
+        "## Citation\n\n"
+        f"{citation}\n"
+        "## License\n\n"
+        "Apache-2.0 (code + weights). Training data is CC-BY-4.0; the article is CC-BY-4.0.\n"
+    )
 
     return frontmatter + body
 
@@ -330,6 +343,16 @@ def main() -> None:
     corpus = load_corpus_stats(args.train_glob, tokenizer_path=args.tokenizer)
     arch = load_arch_config(args.promotion_config)
 
+    # Prefer scores measured against the actual checkpoint over the sprint
+    # baseline pointer in the ledger (which reflects the 30M proxy, not the
+    # 84M promotion model). Smoke results become the sample generations.
+    eval_full = load_eval_full(args.checkpoint)
+    samples = None
+    if eval_full is not None:
+        for k in ("score_ppl_bpb", "score_lexicon", "score_flatness", "score_smoke"):
+            baseline[k] = eval_full[k]
+        samples = eval_full["smoke_results"] or None
+
     from factory.bounds import estimate_param_count
     params = estimate_param_count(
         n_layers=arch["n_layers"], n_embd=arch["n_embd"],
@@ -358,7 +381,7 @@ def main() -> None:
         "author": "Fatih Burak Karagöz",
         "affiliation": "CDLI",
         "arxiv_id": args.arxiv_id,
-        "samples": None,
+        "samples": samples,
         "repo_id": args.repo_id,
     }
     card = generate_model_card(meta)

@@ -1,0 +1,46 @@
+{
+  "corpus": {
+    "documents": 59,
+    "pages": 24253,
+    "chars": 70084358,
+    "era_breakdown": {
+      "classical": 14426,
+      "late_ottoman": 9636,
+      "tanzimat": 191
+    },
+    "genre_breakdown": {
+      "other": 5313,
+      "poetry": 3606,
+      "newspaper": 9248,
+      "literary": 6086
+    }
+  },
+  "experiments": {
+    "total": 356,
+    "accepts": 6,
+    "reject_eval": 343,
+    "reject_smoke": 7,
+    "accept_ids": [
+      1,
+      12,
+      14,
+      133,
+      191,
+      202
+    ],
+    "first_baseline": {
+      "id": 1,
+      "score_ppl_bpb": 2.204615040653243,
+      "score_lexicon": 10.04566417812374,
+      "score_flatness": 0.01079136690647482,
+      "score_smoke": 0.4
+    },
+    "current_baseline": {
+      "id": 202,
+      "score_ppl_bpb": 2.198722978266505,
+      "score_lexicon": 2.676745428307647,
+      "score_flatness": 0.0036900369003690036,
+      "score_smoke": 0.4
+    }
+  }
+}

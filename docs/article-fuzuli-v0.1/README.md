@@ -18,6 +18,12 @@ Ottoman Turkish is not a single language, it is six centuries of overlapping reg
 
 Fine-tuning a multilingual model is the easy path; it is also the path that bakes in modern Turkish bias and imports tokenization choices made for languages that share almost no morphology with Ottoman. The decision here is the harder one: own the tokenizer, own the data pipeline, own every weight from the first matmul forward. The cost is a smaller model trained on less data; the benefit is an artifact that is unambiguously *of* the corpus it was trained on. This stance follows a wider tradition of from-scratch low-resource language models — Welsh BERT [13], BERTurk [12], the OSCAR-trained European national models [16] — which have repeatedly demonstrated that a smaller, language-faithful model trained on a curated in-domain corpus outperforms a larger multilingual model fine-tuned on the same downstream task.
 
+### 1.1 — A note on prior work
+
+Fuzuli continues a line of work I have contributed to on the computational treatment of Ottoman Turkish. In *Towards a Clean Text Corpus for Ottoman Turkish* (Karagöz, Doğan & Özateş, SIGTURK 2024) [18], my co-authors and I constructed an initial cleaned Ottoman corpus and used it for **continual pre-training** of BERTurk [12], demonstrating that even modest amounts of in-domain text can adapt a Modern Turkish encoder to a historical variant for downstream tasks such as named entity recognition. The broader infrastructure effort I co-author with the Boğaziçi NLP group, *Building Foundations for Natural Language Processing of Historical Turkish: Resources and Models* (Özateş et al., 2025) [19], introduced the **HisTR** dataset, the **OTA-BOUN** Universal Dependencies treebank, and the **OTC** corpus, alongside fine-tuned task models published under the `bucolin` organization on HuggingFace.
+
+Fuzuli takes the next step in that programme. Rather than continually pre-training or fine-tuning Modern Turkish base models, it trains a decoder-only language model end-to-end on the historical variant alone — with its own tokenizer, its own frozen evaluation harness, and no inherited weights. The progression is intentional: encoder fine-tuning answers *can the existing infrastructure be adapted?*, and the answer is *yes, partially*. From-scratch decoder pretraining answers a different question — *what does the language look like to a model that has never been told anything about Modern Turkish?* — and the resulting artifact is, by construction, free of any Modern-Turkish prior.
+
 ## 2 — The corpus
 
 The training data is the union of two HuggingFace datasets I previously curated and published — `fatihburakkaragoz/anadolu-ocr-corpus` (52 documents, OCR'd via DeepSeek-OCR-2 at 200–300 DPI) and `fatihburakkaragoz/evliya-celebi-seyahatname-ocr` (7 books of Evliya Çelebi's travelogue) — combined and processed through a four-stage cleaning pipeline:
@@ -287,6 +293,10 @@ This work is released under my own name without external attribution claims. Com
 [16] Suárez, P. J. O., Romary, L., Sagot, B. (2019). **Asynchronous Pipeline for Processing Huge Corpora on Medium to Low Resource Infrastructures** (the OSCAR corpus, basis for many low-resource national LMs). *Workshop on Challenges in the Management of Large Corpora.*
 
 [17] Chen, X. *et al.* (2023). **Symbolic Discovery of Optimization Algorithms** (the *Lion* optimizer). *arXiv:2302.06675.*
+
+[18] Karagöz, F., Doğan, B., Özateş, Ş. B. (2024). **Towards a Clean Text Corpus for Ottoman Turkish.** *Proceedings of the First Workshop on Natural Language Processing for Turkic Languages (SIGTURK 2024), pp. 62–70, Association for Computational Linguistics.*
+
+[19] Özateş, Ş. B., Tıraş, T. E., Adak, E. E., Doğan, B., Karagöz, F. B., Genç, E. E., Taşdemir, E. F. B. (2025). **Building Foundations for Natural Language Processing of Historical Turkish: Resources and Models.** *arXiv:2501.04828.*
 
 ---
 

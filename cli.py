@@ -255,6 +255,77 @@ def eval_cmd(checkpoint, tokenizer):
     }, indent=2))
 
 
+@cli.command("publish-baseline")
+@click.option("--checkpoint", type=click.Path(exists=True, path_type=Path), required=True,
+              help="Path to the promoted checkpoint dir (e.g. checkpoints/fuzuli-v0.1).")
+@click.option("--repo-id", type=str, required=True,
+              help="HF repo id, e.g. fatihburakkaragoz/fuzuli-base.")
+@click.option("--version", type=str, default="v0.1")
+@click.option("--public", is_flag=True, default=False, help="Create the repo as public.")
+@click.option("--include-article", is_flag=True, default=False,
+              help="Bundle docs/article-fuzuli-v0.1/ into the release.")
+@click.option("--arxiv-id", type=str, default=None,
+              help="arXiv ID for cross-linking, e.g. 2606.12345.")
+@click.option("--dry-run", is_flag=True, default=False,
+              help="Stage the release folder but skip the HF upload.")
+def publish_baseline_cmd(checkpoint, repo_id, version, public, include_article, arxiv_id, dry_run):
+    """Push the current baseline checkpoint + tokenizer + model card to HuggingFace Hub.
+
+    Reads scores from experiments.sqlite, corpus stats from data/clean/, architecture
+    from train/configs/promotion.yaml. Stages everything in .release/ first, then
+    uploads via huggingface_hub.
+
+    Requires `huggingface-cli login` to have been run with a write-scope token.
+    """
+    from tools.publish_baseline import (
+        load_baseline_metadata, load_corpus_stats, load_arch_config,
+        generate_model_card, stage_release_folder, upload_to_hf,
+    )
+    from factory.bounds import estimate_param_count
+
+    baseline = load_baseline_metadata(Path("experiments.sqlite"))
+    corpus = load_corpus_stats("data/clean/train/*.parquet",
+                                tokenizer_path=Path("tokenizer/asena-bpe-24k.json"))
+    arch = load_arch_config(Path("train/configs/promotion.yaml"))
+    params = estimate_param_count(
+        n_layers=arch["n_layers"], n_embd=arch["n_embd"],
+        n_head=arch["n_head"], n_kv_heads=arch["n_kv_heads"],
+        mlp_ratio=arch["mlp_ratio"], vocab_size=24000,
+        tied=arch["tie_embeddings"],
+    )
+    meta = {
+        "model_name": "fuzuli-base", "version": version,
+        "params": params, "git_sha": baseline["git_sha"],
+        "baseline": baseline,
+        "corpus": {"rows": corpus["rows"], "chars": corpus["chars"],
+                   "tokens": corpus.get("tokens", 0), "documents": 59},
+        "arch": arch,
+        "datasets": [
+            "fatihburakkaragoz/anadolu-ocr-corpus",
+            "fatihburakkaragoz/evliya-celebi-seyahatname-ocr",
+        ],
+        "license": "apache-2.0",
+        "author": "Fatih Burak Karagöz", "affiliation": "CDLI",
+        "arxiv_id": arxiv_id, "samples": None, "repo_id": repo_id,
+    }
+    card = generate_model_card(meta)
+    article_dir = Path("docs/article-fuzuli-v0.1") if include_article else None
+    staged = stage_release_folder(
+        checkpoint_dir=checkpoint, model_card=card,
+        out_dir=Path(".release") / repo_id.replace("/", "__"),
+        article_dir=article_dir,
+    )
+    click.echo(f"publish-baseline: staged at {staged.resolve()}")
+    click.echo(f"  files: {sorted(p.name for p in staged.iterdir())}")
+
+    if dry_run:
+        click.echo("--dry-run: skipping HF upload.")
+        return
+    url = upload_to_hf(staged, repo_id=repo_id, public=public,
+                       commit_message=f"Fuzuli {version} release")
+    click.echo(f"publish-baseline: uploaded to {url}")
+
+
 @cli.command("export-gguf")
 @click.option("--checkpoint", type=click.Path(exists=True, path_type=Path), required=True)
 @click.option("--out", type=click.Path(path_type=Path), required=True)

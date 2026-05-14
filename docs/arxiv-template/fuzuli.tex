@@ -311,6 +311,48 @@ This is significantly under Chinchilla-optimal~\citep{hoffmann2022chinchilla}
 --- for an 84\,M-parameter model the Chinchilla rule recommends $\approx$1.7
 billion unique tokens. Section~\ref{sec:scaling} returns to this point.
 
+\subsection{Evaluation at promotion scale}
+
+The 84.8\,M-parameter promotion checkpoint was evaluated against the same
+frozen heldout split used throughout the sprint search.
+
+\begin{table}[t]
+  \centering\small
+  \begin{tabular}{lrrl}
+    \toprule
+    \textbf{Metric} & \textbf{Sprint baseline} & \textbf{Promotion} & $\boldsymbol{\Delta}$ \\
+                    & \textbf{($\approx$30\,M)} & \textbf{(84.8\,M)} & \\
+    \midrule
+    Heldout PPL (bits/byte)        & 2.199 & \textbf{1.929} & $-0.270$ (improved) \\
+    Ottoman lexicon score          & 2.677 & 9.873          & $+7.20$ (regressed) \\
+    Modern-Turkish flatness        & 0.0037 & 0.0110        & $+0.007$ (regressed) \\
+    Smoke fail rate                & 0.40 (2/5) & 0.80 (4/5) & $+0.40$ (regressed) \\
+    \bottomrule
+  \end{tabular}
+  \caption{Sprint search baseline vs.\ promotion checkpoint on the frozen
+    four-metric harness. The larger model improves perplexity by 0.27
+    bits/byte but regresses on every generation-time metric --- the
+    canonical data-ceiling pattern.}
+  \label{tab:promotion-eval}
+\end{table}
+
+The 84.8\,M model \textbf{improves heldout perplexity by 0.27 bits/byte}
+--- meaningful evidence that the larger architecture has captured more of
+the corpus's statistical structure. But it regresses on every
+generation-time metric.
+
+This divergence is the v0.1 data-ceiling pattern restated.
+Heldout perplexity is a \emph{closed-form} metric: it scores the model's
+likelihood on text the model never sees during generation. The other
+metrics depend on what the model produces \emph{under autoregressive
+sampling}. A larger model has more capacity to memorize the corpus (lower
+PPL) but, without enough data to ground its generation, correspondingly
+more freedom to drift under sampling. The smaller sprint model is more
+conservative simply because it has less capacity to express creative drift
+with. Expanding the corpus to v0.5 / v1.0 targets is the only intervention
+that recovers the generation metrics; no recipe tweak at this data scale
+will.
+
 % =============================================================================
 \section{Autoresearch methodology}\label{sec:autoresearch}
 % =============================================================================

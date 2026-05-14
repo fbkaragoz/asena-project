@@ -1,5 +1,15 @@
 # arXiv submission template (deferred until v1.0)
 
+**Status:** the canonical v0.1 content lives in
+`docs/article-fuzuli-v0.1/README.md`. The LaTeX in this directory is kept
+roughly synchronized with the markdown for substantive sections, but minor
+prose-level edits to the markdown may not always be back-ported. Treat the
+markdown as authoritative.
+
+---
+
+
+
 This directory holds `fuzuli.tex` — a LaTeX version of the v0.1 release writeup
 formatted as an arXiv preprint.
 

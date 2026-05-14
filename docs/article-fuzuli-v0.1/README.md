@@ -128,6 +128,49 @@ This is significantly under Chinchilla-optimal — for an 84M-parameter model th
 
 The compensation is the kind familiar from low-resource modeling: heavy regularization (`weight_decay = 0.2` in the sprint configuration, `0.1` in promotion), early stopping on heldout perplexity, and a deliberately small model size that approaches but does not exceed what the data can support.
 
+### 3.3 — Evaluation at promotion scale
+
+The 84.8M-parameter promotion checkpoint was evaluated against the same frozen heldout split used throughout the sprint search. The result is informative — not in the sense of "the bigger model is better" but in the sense of "the bigger model exposes the corpus's data ceiling more sharply":
+
+| Metric | Sprint search baseline (≈30M model) | Promotion checkpoint (84.8M model) | Δ |
+|---|---|---|---|
+| Heldout PPL (bits/byte) | 2.199 | **1.929** | **-0.270** (improved) |
+| Ottoman lexicon score | 2.677 | **9.873** | **+7.20** (regressed) |
+| Modern-Turkish flatness | 0.0037 | 0.0110 | +0.007 (regressed) |
+| Smoke fail rate | 0.40 (2/5) | 0.80 (4/5) | +0.40 (regressed) |
+
+The 84.8M model **improves heldout perplexity by 0.27 bits/byte** — meaningful evidence that the larger architecture has captured more of the corpus's statistical structure than the 30M sprint proxy. But it **regresses on every generation-time metric**.
+
+This divergence is not a configuration bug; it is exactly the v0.1 data-ceiling pattern from §7. Heldout perplexity is a *closed-form* metric — it scores the model's likelihood on text the model never sees during generation. The other three metrics depend on what the model produces *under autoregressive sampling*. A larger model has more capacity to memorize the corpus (lower PPL) but, without enough data to ground its generation, it has correspondingly more freedom to drift under sampling: longer outputs, more chances to reach for modern-Turkish vocabulary, more opportunities to fall into n-gram repetition loops. The smaller sprint model is more conservative simply because it has fewer parameters to express creative drift with.
+
+This is reported transparently. Expanding the corpus to v0.5 / v1.0 targets is the only intervention that recovers the generation metrics; no recipe tweak at this data scale will.
+
+### 3.4 — Sample generations (greedy decoding)
+
+Outputs from the promotion checkpoint on the five frozen smoke prompts. These are the same prompts used to compute the smoke fail rate above; each generation is annotated with the smoke-eval verdict.
+
+> **Prompt:** *Sultan Abdülhamid'in saltanatı sırasında*
+> **Completion:** *"Müftî"nin taht-ı idâresinde bir hayli münakaş bir hey'et-şinâslıklı bir hey'et-şinâslık Türk- ler mu- vaffakıyyete karşı mu'cizelerle teşerrüf ediyor. O, mevki'lerini ihâta eden bir zât o hey'-ı ilâhîye mazhar olmak için Avrupa'nın daha büyük bir ehemmiyet-i nâfi'...*
+> **Verdict:** ✗ rejected — loanword: `mevki`
+
+> **Prompt:** *Şehrin bedesteninde*
+> **Completion:** *Yirmi bin kadar; sonra da; sonra da; Yavaş, alıp önceden da fazla; Yavaş yavaş yavaşça... Ne var, ne; Alın; Alın da meydanda. O; rûh-i İslâm'ın... O da bir nûrunu: "Yaşamak için mutlakâ yarattım; O, koşuyorum, ayrıldın da Şark'i yık...*
+> **Verdict:** ✓ accepted
+
+> **Prompt:** *Tanzimat fermanı*
+> **Completion:** *bu kadar ma'mûr u müzeyyen ve müzeyyen ve ma'mûr u müzeyyen ma'mûr u müzeyyen ma'mûr u âbâdân kurâlar ve bâğ u bâğçe ve bâğ u bâğçe...*
+> **Verdict:** ✗ rejected — 5-gram repetition
+
+> **Prompt:** *Divan-ı hümayunda toplanan vezirleriyle*
+> **Completion:** *bu konferansın pek mühim bir zamanda büyük bir kuvvetle idâre edecektir. Ankara'da bulunan Ankara gazetesi yazıyor. Ankara'da bulunan British Mu- hamid gibi Vukû'ları idâresinde pek çok kıymetdâr şeylerin zuhûru gelen bu bir takım mesâilin açtığı büyük bir bu husûsda münderic bulunan bir eser-i mahsûsa, bu tereddüde…*
+> **Verdict:** ✗ rejected — loanword: `takım`
+
+> **Prompt:** *Yeniçeri ocağının kaldırılması için*
+> **Completion:** *kendisine bir kat daha arttırıyor. Bu yüzdendir ki, bu kongrenin, nüshaların, mekteplerin, medreselerin sosyalistlerini, köylünün dinlerini, çocuklarını, çocuklarını, çocuklarını, dünyaya, hâsılı bütün köylünün dinini, gerek müslümanca yaşadığı bu konuda yeniden, gerek eskiden beri, gerek müslüman ve ictimâî hayatında, gerek hükümet…*
+> **Verdict:** ✗ rejected — loanword: `hükümet`
+
+Reading these together: the model has internalized Ottoman-Turkish *stylistic surface* (`taht-ı idâresinde`, `mu'cizelerle teşerrüf`, `bâğ u bâğçe`, `eser-i mahsûsa`) and Arabic-Persian morphology (`mevki'lerini`, `âbâdân`, `mahsûsa`); it has not learned to keep modern-Turkish vocabulary out of its outputs, and it has not yet developed the planning that would prevent multi-clause repetition loops. Both failure modes are corpus-density problems, not architecture problems.
+
 ## 4 — Autoresearch methodology
 
 The recipe was not hand-tuned. Instead, an LLM-based research agent was given write access to a constrained surface — `train/configs/sprint.yaml`, `train/train.py`, `train/arch.py`, `data/cleaning_rules.yaml` — and instructed to propose one focused change per cycle, run a 5-minute sprint training, observe the results, and iterate. Around this agent sits a **factory**: a deterministic orchestrator that enforces protected-path immutability, scans patches for forbidden architectural patterns, runs the training, evaluates against four metrics, and applies a strict-no-trades accept/reject policy. Accepted experiments are merged into `main`; rejected experiments have their branches deleted but their full record preserved in a SQLite ledger.

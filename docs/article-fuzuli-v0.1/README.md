@@ -16,11 +16,13 @@ This first version is released as a research artifact, not a production tool. It
 
 Ottoman Turkish is not a single language, it is six centuries of overlapping registers — classical *dîvân* poetry, *seyahatnâme* travel prose, *tezkire* biographical compilations, late-Ottoman periodical journalism, *risâle* religious treatises — written across a script transition (Arabic-letter to Latin-letter, formalized in 1928) that broke continuity for most modern computational tools. The corpus that does exist in machine-readable Latinized form is small, scattered across academic websites, and rarely curated for language modeling.
 
-Fine-tuning a multilingual model is the easy path; it is also the path that bakes in modern Turkish bias and imports tokenization choices made for languages that share almost no morphology with Ottoman. The decision here is the harder one: own the tokenizer, own the data pipeline, own every weight from the first matmul forward. The cost is a smaller model trained on less data; the benefit is an artifact that is unambiguously *of* the corpus it was trained on. This stance follows a wider tradition of from-scratch low-resource language models — Welsh BERT [13], BERTurk [12], the OSCAR-trained European national models [16] — which have repeatedly demonstrated that a smaller, language-faithful model trained on a curated in-domain corpus outperforms a larger multilingual model fine-tuned on the same downstream task.
+Fine-tuning a multilingual model is the easy path; it is also the path that bakes in modern Turkish bias and imports tokenization choices made for languages that share almost no morphology with Ottoman. The decision here is the harder one: own the tokenizer, own the data pipeline, own every weight from the first matmul forward. The cost is a smaller model trained on less data; the benefit is an artifact that is unambiguously *of* the corpus it was trained on. This stance follows a wider tradition of from-scratch low-resource language models — BERTurk [12], the OSCAR-trained European national models [16], and curated-corpus small-LM training in the spirit of TinyStories [13] — which have repeatedly demonstrated that a smaller, language-faithful model trained on a curated in-domain corpus outperforms a larger multilingual model fine-tuned on the same downstream task.
 
 ### 1.1 — A note on prior work
 
-Fuzuli continues a line of work I have contributed to on the computational treatment of Ottoman Turkish. In *Towards a Clean Text Corpus for Ottoman Turkish* (Karagöz, Doğan & Özateş, SIGTURK 2024) [18], my co-authors and I constructed an initial cleaned Ottoman corpus and used it for **continual pre-training** of BERTurk [12], demonstrating that even modest amounts of in-domain text can adapt a Modern Turkish encoder to a historical variant for downstream tasks such as named entity recognition. The broader infrastructure effort I co-author with the Boğaziçi NLP group, *Building Foundations for Natural Language Processing of Historical Turkish: Resources and Models* (Özateş et al., 2025) [19], introduced the **HisTR** dataset, the **OTA-BOUN** Universal Dependencies treebank, and the **OTC** corpus, alongside fine-tuned task models published under the `bucolin` organization on HuggingFace.
+Fuzuli continues a line of work I have contributed to on the computational treatment of Ottoman Turkish. In *Towards a Clean Text Corpus for Ottoman Turkish* (Karagöz, Doğan & Özateş, SIGTURK 2024) [18], my co-authors and I constructed an initial cleaned Ottoman corpus and used it for **continual pre-training** of BERTurk [12], demonstrating that even modest amounts of in-domain text can adapt a Modern Turkish encoder to a historical variant for downstream tasks such as named entity recognition. The cleaning methodology developed there — regex-based normalization, handling of intertwined bidirectional Arabic/Latin script, private-use-area character mapping, dehyphenation — is the direct predecessor of §2's four-stage pipeline.
+
+The broader infrastructure effort I co-author with the Boğaziçi NLP group, *Building Foundations for Natural Language Processing of Historical Turkish: Resources and Models* (Özateş et al., 2025) [19], introduced the **HisTR** dataset, the **OTA-BOUN** Universal Dependencies treebank, and the **OTC** corpus, alongside fine-tuned task models published under the `bucolin` organization on HuggingFace. That work establishes concrete downstream baselines for historical Turkish — NER F1 of **90.29** on HisTR, dependency-parsing LAS of **73.79** on OTA-BOUN, POS F1 of **94.98** — against which a from-scratch decoder-only successor can be measured.
 
 Fuzuli takes the next step in that programme. Rather than continually pre-training or fine-tuning Modern Turkish base models, it trains a decoder-only language model end-to-end on the historical variant alone — with its own tokenizer, its own frozen evaluation harness, and no inherited weights. The progression is intentional: encoder fine-tuning answers *can the existing infrastructure be adapted?*, and the answer is *yes, partially*. From-scratch decoder pretraining answers a different question — *what does the language look like to a model that has never been told anything about Modern Turkish?* — and the resulting artifact is, by construction, free of any Modern-Turkish prior.
 
@@ -126,9 +128,9 @@ The recipe was not hand-tuned. Instead, an LLM-based research agent was given wr
 
 ![Autoresearch system architecture](assets/system_architecture.png)
 
-### 4.1 — What is novel here
+### 4.1 — Design choices in context
 
-Most of Fuzuli's individual components are off-the-shelf. What is genuinely novel is the **autoresearch loop**, in particular four design decisions that distinguish it from naive "let an LLM tune hyperparameters" approaches:
+Most of Fuzuli's individual components are off-the-shelf. The autoresearch loop itself is part of a growing literature on LLM-driven scientific search: FunSearch [20] demonstrated that an LLM in a closed evaluation loop could discover novel mathematical programs by mutating a designated function while a fixed evaluator gates accept/reject; AlphaEvolve [21] generalized this to algorithmic discovery on a wider problem class; Voyager [22] and Reflexion [23] established LLM-agent patterns for persistent memory and self-correction across episodes. What this project contributes is not the autoresearch primitive itself but a specific combination of design decisions tailored to the sub-Chinchilla single-GPU language-modeling setting:
 
 - **Hard tier-based mutability.** The evaluation harness (`eval/`), the tokenizer artifact, the orchestrator (`factory/`), the CLI, and a handful of policy-defining files are *immutable to the agent*. Any patch that modifies them is rejected at pre-flight by glob-based protected-path checking. The agent has write access only to `train/configs/`, `train/train.py`, `train/arch.py`, and `data/cleaning_rules.yaml`. This guarantees that a recipe accepted by one experiment can be meaningfully compared against another, because the *measurement instrument* never changes.
 
@@ -171,7 +173,9 @@ The dominant rejection class is heldout-perplexity regression, followed by lexic
 
 ## 6 — What the agent tried
 
-Over those 356 experiments, the agent traversed essentially the entire standard recipe-search playbook:
+All 356 experiments below were run on the **sprint configuration** — a smaller proxy model (n_layers=6, n_embd=384, n_kv_heads=2, ≈30 M parameters, 25 M training tokens, ≈76 s wall clock) used to discover hyperparameter recipes that are then applied to the larger ≈84 M-parameter promotion model in §3. This separation is by design: sprints are short enough for hundreds of cycles per day; promotions are 1–2 hours each. The autoresearch loop iterates only over sprints. The "baseline" values in the table below therefore reference the sprint config, not the §3 architecture table.
+
+Over the session, the agent traversed essentially the entire standard recipe-search playbook:
 
 | Dimension | Values tried |
 |---|---|
@@ -207,7 +211,7 @@ This is the textbook signature of a **data-starved training regime**: when the d
 
 ![Where Fuzuli v0.1 sits relative to Chinchilla](assets/scaling_landscape.png)
 
-Chinchilla [7] established that for compute-optimal training, the number of training tokens should scale roughly as 20× the number of parameters. Fuzuli sees 60M tokens for 84M parameters — a ratio of **0.71 tok/param**, against the Chinchilla optimum of 20. That places it firmly in the *undertrained* / low-resource regime, alongside Welsh BERT [13] and similar small from-scratch language-faithful models. This is not an accident: when the corpus is the binding constraint, the choice is between a smaller model that fits the data (Fuzuli's path) or a larger model that overfits hard (the path explicitly rejected by the spec amendments during this project's planning phase).
+Chinchilla [7] established that for compute-optimal training, the number of *unique* training tokens should scale roughly as 20× the number of parameters. Fuzuli has **8 M unique training tokens for 84 M parameters — a unique-data-to-parameter ratio of 0.095**, against the Chinchilla optimum of 20. That is roughly **200× under** the compute-optimal frontier. (Counting training-token *passes* across the ~7 epochs raises the seen-token ratio to ~0.71, but Chinchilla scaling laws are properly defined on unique data, not on passes; see Muennighoff et al. [24] on data-constrained training, where multiple epochs partly but not fully recover the marginal value of additional unique data.) This places Fuzuli firmly in the *undertrained* / low-resource regime, alongside small from-scratch language-faithful models trained on tightly curated corpora [13]. When the corpus is the binding constraint, the choice is between a smaller model that fits the data (Fuzuli's path) or a larger model that overfits hard (the path rejected by the spec amendments during planning).
 
 The opposite end of the landscape is illustrative. LLaMA-2-7B was trained on 2 trillion tokens for 7 billion parameters [9] — a ratio of ~286 tok/param, fully 14× *over* the Chinchilla optimum. The modern best practice for production LMs is *intentional overtraining*, because inference-time cost dominates training-time cost at deployment scale. Fuzuli takes the opposite trade because there is no deployment-scale inference and there is no 2T-token Ottoman corpus.
 
@@ -284,7 +288,7 @@ This work is released under my own name without external attribution claims. Com
 
 [12] Schweter, S. (2020). **BERTurk — BERT Models for Turkish.** *Zenodo. doi:10.5281/zenodo.3770924.*
 
-[13] Welsh-NLP community (2022-). **WelshBERT (cy-bert) and BERTweet-Cym** — small from-scratch Welsh language models. *Cardiff NLP / Bangor University releases on HuggingFace.*
+[13] Eldan, R., Li, Y. (2023). **TinyStories: How Small Can Language Models Be and Still Speak Coherent English?** *arXiv:2305.07759.*
 
 [14] Conneau, A. *et al.* (2020). **Unsupervised Cross-lingual Representation Learning at Scale** (XLM-R). *ACL 2020.*
 
@@ -297,6 +301,16 @@ This work is released under my own name without external attribution claims. Com
 [18] Karagöz, F., Doğan, B., Özateş, Ş. B. (2024). **Towards a Clean Text Corpus for Ottoman Turkish.** *Proceedings of the First Workshop on Natural Language Processing for Turkic Languages (SIGTURK 2024), pp. 62–70, Association for Computational Linguistics.*
 
 [19] Özateş, Ş. B., Tıraş, T. E., Adak, E. E., Doğan, B., Karagöz, F. B., Genç, E. E., Taşdemir, E. F. B. (2025). **Building Foundations for Natural Language Processing of Historical Turkish: Resources and Models.** *arXiv:2501.04828.*
+
+[20] Romera-Paredes, B. *et al.* (2024). **Mathematical discoveries from program search with large language models** (FunSearch). *Nature 625, 468–475.*
+
+[21] Novikov, A. *et al.* (2025). **AlphaEvolve: A coding agent for scientific and algorithmic discovery.** *DeepMind / arXiv.*
+
+[22] Wang, G. *et al.* (2023). **Voyager: An Open-Ended Embodied Agent with Large Language Models.** *arXiv:2305.16291.*
+
+[23] Shinn, N., Cassano, F., Berman, E., Gopinath, A., Narasimhan, K., Yao, S. (2023). **Reflexion: Language Agents with Verbal Reinforcement Learning.** *NeurIPS 2023.*
+
+[24] Muennighoff, N. *et al.* (2023). **Scaling Data-Constrained Language Models.** *NeurIPS 2023.*
 
 ---
 

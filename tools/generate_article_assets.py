@@ -455,16 +455,17 @@ def fig_tokenizer_compression() -> None:
 
 def fig_scaling_landscape() -> None:
     """Scatter of params vs training tokens, with Chinchilla-20 line."""
-    # name, params (M), training tokens (M)
+    # name, params (M), unique training tokens (M)
+    # All counts are unique-token data-scale (the Chinchilla axis), not seen-with-repetition.
     points = [
-        ("GPT-2 (small)",       117,    8_000),     # ≈8B tokens, OWT
+        ("GPT-2 (small)",       117,    8_000),     # ~8B tokens, OWT
         ("GPT-3 (175B)",        175_000, 300_000),  # 300B tokens
         ("LLaMA-2 7B",          7_000,  2_000_000), # 2T tokens
         ("Chinchilla 70B",      70_000, 1_400_000), # 1.4T tokens
         ("BLOOM 560M",          560,    341_000),   # 341B
-        ("BERTurk (cased)",     110,    3_500),     # ~35GB raw → ~3.5B tokens (rough)
-        ("Welsh BERT (cy-bert)", 110,    50),        # ~5M tokens
-        ("Fuzuli v0.1",          84,    60),        # 60M training tokens
+        ("BERTurk (cased)",     110,    3_500),     # ~35GB raw text → ~3.5B tokens (rough)
+        ("TinyStories-33M",      33,    480),       # ~480M synthetic tokens
+        ("Fuzuli v0.1",          84,    8),         # 8M unique BPE tokens
     ]
     names = [p[0] for p in points]
     params = np.array([p[1] for p in points])
@@ -490,8 +491,8 @@ def fig_scaling_landscape() -> None:
         "Chinchilla 70B":      (1.20, 1.15),
         "BLOOM 560M":          (1.20, 1.10),
         "BERTurk (cased)":     (1.30, 1.30),
-        "Welsh BERT (cy-bert)": (1.30, 0.55),
-        "Fuzuli v0.1":          (1.40, 1.45),
+        "TinyStories-33M":     (1.30, 0.65),
+        "Fuzuli v0.1":         (1.40, 1.55),
     }
     for n, p, t in zip(names, params, tokens):
         is_us = n == "Fuzuli v0.1"
@@ -509,12 +510,12 @@ def fig_scaling_landscape() -> None:
     ax.set_xscale("log")
     ax.set_yscale("log")
     ax.set_xlabel("Model parameters (millions)")
-    ax.set_ylabel("Training tokens (millions)")
+    ax.set_ylabel("Unique training tokens (millions, log scale)")
     ax.set_title("Where Fuzuli v0.1 sits in the scaling landscape — "
                  "deep in the low-resource regime, but in good company",
                  fontsize=11)
-    ax.set_xlim(40, 1e6)
-    ax.set_ylim(8, 1e7)
+    ax.set_xlim(20, 1e6)
+    ax.set_ylim(2, 1e7)
     ax.legend(loc="lower right", fontsize=8.5)
     ax.grid(True, which="both", alpha=0.2)
     fig.tight_layout()

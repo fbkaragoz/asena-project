@@ -6,9 +6,11 @@ May 2026
 
 > *CDLI is an independent laboratory for AI products and systems. Fuzuli v0.1 is its first public research release.*
 
+> **About this document.** This is the **v0.1 release writeup** for the Fuzuli Ottoman-Turkish language model — published as both the HuggingFace model card and the project's GitHub release blog. It documents what was built, what the first 24 hours of autoresearch produced, and the data-ceiling diagnosis that resulted. A comprehensive cross-version technical report covering the v0.1 → v0.5 → v1.0 trajectory, the full autoresearch methodology, and head-to-head comparisons against existing Turkish-NLP baselines will be prepared for arXiv when the project reaches v1.0 maturity. See [`RELEASE-PLAN.md`](https://github.com/fbkaragoz/asena-project/blob/main/RELEASE-PLAN.md) for the full release roadmap.
+
 ---
 
-## Abstract
+## TL;DR
 
 **Fuzuli v0.1** is an 84-million-parameter decoder-only language model trained from scratch on Latinized post-1500 Ottoman Turkish. The training corpus consists of 24,253 OCR-cleaned pages (70.1 million characters, ≈8 million unique tokens under a custom 24,000-token BPE vocabulary) drawn from 59 distinct historical documents — among them the full available *Seyahatnâme* of Evliya Çelebi, the complete 25-volume run of the late-Ottoman periodicals *Sebilürreşad* and *Sırat-ı Müstakim*, and 25 individual classical and late-classical works ranging from Necati Bey's *Dîvân* (1500) to *Üç Devirde Gördüklerim* (1866). No foreign weights were inherited; no model was fine-tuned. The tokenizer, the training data, and the model weights are all produced end-to-end inside the project.
 

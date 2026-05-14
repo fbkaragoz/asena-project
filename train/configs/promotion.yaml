@@ -1,10 +1,11 @@
 # train/configs/promotion.yaml — AGENT-EDITABLE (Tier 2)
-# Sized for ~84M params on 7.97M unique tokens (~7 epochs). See spec §1.1 amendments.
+# Sized for ~85M params on 7.97M unique tokens (~7 epochs). See spec §1.1 amendments.
+# n_head=8, n_kv_heads=4 → GQA 2:1 ratio (8 Q heads / 4 KV heads); head_dim=80.
 profile: promotion
 model:
   n_layers: 12
   n_embd: 640
-  n_head: 10
+  n_head: 8
   n_kv_heads: 4
   mlp_ratio: 2.67
   rope_theta: 10000.0

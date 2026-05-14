@@ -14,10 +14,28 @@ def test_estimate_param_count_sprint():
 
 
 def test_estimate_param_count_promotion():
-    # Post-second-amendment promotion config: n_layers=12, n_embd=640 → ~84M params.
-    n = estimate_param_count(n_layers=12, n_embd=640, n_kv_heads=4, n_head=10,
+    # Post-second-amendment promotion config: n_layers=12, n_embd=640,
+    # n_head=8 (must be divisible by n_kv_heads=4 for GQA), head_dim=80.
+    n = estimate_param_count(n_layers=12, n_embd=640, n_kv_heads=4, n_head=8,
                              mlp_ratio=2.67, vocab_size=24000, tied=False)
     assert 70_000_000 < n < 100_000_000
+
+
+def test_promotion_config_is_gqa_valid():
+    """The promotion YAML must satisfy n_head % n_kv_heads == 0 (GQA invariant).
+
+    Regression guard for the v0.1 bug where n_head=10, n_kv_heads=4 was shipped
+    in train/configs/promotion.yaml and train/arch.py rightly aborted on the
+    first instantiation. See arch.py:60 assertion.
+    """
+    import yaml
+    from pathlib import Path
+    cfg = yaml.safe_load(Path("train/configs/promotion.yaml").read_text())
+    n_head = cfg["model"]["n_head"]
+    n_kv = cfg["model"]["n_kv_heads"]
+    n_embd = cfg["model"]["n_embd"]
+    assert n_head % n_kv == 0, f"GQA invariant violated: n_head={n_head} not divisible by n_kv_heads={n_kv}"
+    assert n_embd % n_head == 0, f"head_dim non-integer: n_embd={n_embd} not divisible by n_head={n_head}"
 
 
 def test_check_sprint_bounds_rejects_too_big():

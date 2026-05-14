@@ -81,15 +81,15 @@ The model dimensions:
 |---|---|
 | Layers | 12 |
 | Hidden dim | 640 |
-| Attention heads | 10 (Q) |
+| Attention heads | 8 (Q) |
 | KV heads (GQA) | 4 |
-| Head dim | 64 |
+| Head dim | 80 |
 | MLP | SwiGLU, mlp_ratio 2.67 (hidden 1707) |
 | Positional embedding | RoPE, θ = 10,000 |
 | Normalization | RMSNorm, no bias |
 | Embedding tying | False (untied LM head) |
 | Tokenizer | BPE, vocab 24,000, byte-fallback |
-| Total parameters | **≈ 84 M** (15.4 M embedding, 53.1 M body, 15.4 M LM head, 0.6 M misc) |
+| Total parameters | **≈ 84.8 M** (15.4 M embedding, ~54.1 M body, 15.4 M LM head, ~0.4 M misc) |
 
 ### 3.1 — Architectural choices in context
 
@@ -97,7 +97,7 @@ Each component reflects current best-practice in dense decoder models post-2023.
 
 - **Decoder-only over encoder-decoder.** Following the GPT family [10] and contemporary open-weight LMs (LLaMA [9], Mistral). Encoder-decoder architectures [8] dominate paired-task settings such as translation and summarization; foundation-style next-token prediction has converged on decoder-only since GPT-3 [10]. For an Ottoman base LM whose primary use case is generation and perplexity scoring, decoder-only is the natural choice.
 
-- **Grouped-Query Attention (GQA).** Introduced by Ainslie et al. 2023 [3], GQA shares K/V projections across multiple query heads, reducing KV-cache memory and inference latency at negligible quality cost. Fuzuli uses 4 KV heads against 10 query heads (a 2.5:1 ratio), aligning with the LLaMA-2 [9] design and with current consensus that GQA is essentially free.
+- **Grouped-Query Attention (GQA).** Introduced by Ainslie et al. 2023 [3], GQA shares K/V projections across multiple query heads, reducing KV-cache memory and inference latency at negligible quality cost. Fuzuli uses 4 KV heads against 8 query heads (a 2:1 ratio), in the LLaMA-2 [9] design idiom (LLaMA-2-70B uses 8 KV heads against 64 Q heads — 8:1 — and the consensus across modern small LMs is some ratio between 2:1 and 8:1 with little quality cost).
 
 - **Rotary Position Embedding (RoPE).** From Su et al. 2021 [2], RoPE encodes positions as rotation matrices applied to query/key projections. It outperforms sinusoidal absolute positions on long-context extrapolation and underpins essentially every recent open-weight decoder LM. Fuzuli uses θ=10,000 (the original RoPE base; LLaMA-2 also uses 10,000 for sub-2k contexts).
 

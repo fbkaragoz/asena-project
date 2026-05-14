@@ -364,7 +364,7 @@ def fig_model_architecture() -> None:
     block(ax_block, 1.5, 10.0, 5.0, 0.9, "RMSNorm  (no bias)", "#e8e0c5")
     arrow_down(ax_block, cx, 10.0, 9.0)
     block(ax_block, 1.0, 7.3, 6.0, 1.7,
-          "Multi-head Grouped-Query Attention\n10 Q heads · 4 KV heads · head dim 64\nRoPE positional rotation (θ = 10 000)",
+          "Multi-head Grouped-Query Attention\n8 Q heads · 4 KV heads · head dim 80\nRoPE positional rotation (θ = 10 000)",
           "#5b8db8", fontsize=8.5)
     arrow_down(ax_block, cx, 7.3, 6.6)
     add_circle(ax_block, cx, 6.4, "+")
